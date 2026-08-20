@@ -220,6 +220,29 @@ echo.
 pause
 """
 
+STARTUP_BAT = r"""@echo off
+rem 시작 폴더(shell:startup)에 이 파일의 '바로가기' 를 넣어 두면
+rem PC 를 켤 때마다 한 번 갱신한다.
+rem
+rem  - 창을 띄우지 않는다. 결과는 daily.log 에 남는다.
+rem  - 부팅 직후에는 네트워크가 아직 안 붙어 있을 수 있으므로 3분 기다린다.
+rem  - 매일 04:37 작업을 대신하는 것이 아니라 보태는 것이다. PC 를 며칠 안 껐다
+rem    켜면 로그온이 없으니 이건 안 돌고, 그때는 매일 작업이 받아 준다.
+
+cd /d "%~dp0"
+
+rem 최소화된 창으로 스스로를 다시 띄운 뒤 원래 창은 바로 닫는다
+if not "%~1"=="min" (
+  start "" /min cmd /c ""%~f0" min"
+  exit /b 0
+)
+
+echo ==== %DATE% %TIME% 시작 시 갱신 - 네트워크 대기 ====>> daily.log
+timeout /t 180 /nobreak >nul
+call "%~dp0update.bat"
+exit /b %errorlevel%
+"""
+
 STOP_BAT = r"""@echo off
 schtasks /delete /tn "실거래가 갱신" /f
 echo.
@@ -260,6 +283,9 @@ README_TXT = """실거래가 수집기
 - 지금 바로 갱신하고 싶으면      '지금갱신.bat'
 - 무슨 일이 있었는지 보려면      daily.log
 - 자동 실행을 끄려면             '자동실행끄기.bat'
+- PC 를 켤 때마다 갱신하려면     '시작할때갱신.bat' 의 바로가기를
+                                 시작 폴더에 넣으세요.
+                                 (Win+R -> shell:startup -> 바로가기 붙여넣기)
 
 
 돌아가는 방식
@@ -344,6 +370,7 @@ def main():
     wr("설치.bat", INSTALL_BAT, "cp949")
     wr("update.bat", DAILY_BAT, "cp949")            # 스케줄러가 부른다 (ASCII 이름)
     wr("지금갱신.bat", RUNNOW_BAT, "cp949")
+    wr("시작할때갱신.bat", STARTUP_BAT, "cp949")
     wr("자동실행끄기.bat", STOP_BAT, "cp949")
     wr("token.txt", TOKEN_TXT, "utf-8")
     wr("읽어보세요.txt", README_TXT)

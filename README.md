@@ -230,6 +230,7 @@ py -3 bundle.py --no-zip       # 폴더만
 | `지금갱신.bat` | 즉시 갱신하고 로그 끝부분을 보여준다 |
 | `자동실행끄기.bat` | 스케줄 해제 |
 | `update.bat` | 스케줄러가 부르는 실제 작업 (ASCII 이름 — bat 안에서 한글 파일명 참조를 피한다) |
+| `시작할때갱신.bat` | 시작 폴더(`shell:startup`)에 바로가기를 넣어 두면 PC 를 켤 때마다 한 번 돈다 |
 | `token.txt` | GitHub 토큰. 처음 한 번 붙여넣는다 |
 | `읽어보세요.txt` | 3줄 안내 |
 | `cache/` | 67MB. 이게 있어서 상시 PC 에서 10년 전체 수집을 다시 하지 않는다 |
@@ -301,6 +302,32 @@ schtasks /create /tn "실거래가 갱신" /sc daily /st 06:30 /f /tr "\"C:\User
 놓친 실행을 따라잡게 하려면 작업 스케줄러 UI 에서 해당 작업 → 설정 →
 **예약 시작 시간을 놓친 경우 가능한 즉시 작업 시작** 을 켠다.
 실행 기록은 `daily.log` 에 쌓인다.
+
+### PC 를 켤 때마다 돌게 하려면
+
+`schtasks /create` 의 기본값은 `StartWhenAvailable=False` 다. 즉 **04:37 에 PC 가
+꺼져 있었으면 그날은 건너뛴다.** 확인해 본 결과다.
+
+고치는 방법은 두 가지고, 둘 다 해도 된다.
+
+**1) 놓친 실행을 따라잡게 한다 (권장 · 새로 만들 게 없다)**
+
+```powershell
+$t = Get-ScheduledTask "실거래가 갱신"
+$t.Settings.WakeToRun = $true          # 절전이면 깨워서 실행
+$t.Settings.StartWhenAvailable = $true # 놓쳤으면 켜지는 즉시 실행
+Set-ScheduledTask -InputObject $t
+```
+
+**2) 시작 폴더에 넣는다**
+
+`시작할때갱신.bat` 의 **바로가기**를 `Win+R` → `shell:startup` 에 넣는다.
+`지금갱신.bat` 을 넣으면 안 된다 — 끝에 `pause` 가 있어 부팅마다 창이 남는다.
+`시작할때갱신.bat` 은 창을 최소화해 띄우고, 부팅 직후 네트워크가 안 붙은 상태를
+피하려 3분 기다린 뒤 돈다.
+
+2번은 1번을 대신하지 못한다. PC 를 며칠 안 껐다 켜면 로그온이 없어 시작 폴더는
+안 돌고, 그때는 매일 작업이 받아 준다. 완전히 꺼진 PC 는 무엇으로도 깨울 수 없다.
 
 ### 배포 워크플로
 
