@@ -52,9 +52,10 @@ AREA_BUCKETS = {"59": (52.0, 68.0), "84": (74.0, 92.0)}
 AREA_TARGET = {"59": 59.9, "84": 84.9}
 
 # '신규 거래' 탭은 월별 집계가 아니라 개별 거래(거래일·층·금액)를 보여준다.
-# 최근 이 개월 수만큼의 거래를 apt_data.json 에 따로 싣는다. 3개월이면 약 3,500건
-# (gzip 30KB 수준)이라 화면 쪽에서 1~3개월로 좁혀 보게 하기에 충분하다.
-RECENT_MONTHS = 3
+# 최근 이 개월 수만큼의 거래를 apt_data.json 에 따로 싣는다.
+# 화면은 오늘 날짜에서 거꾸로 1~3개월을 자르는데, 그 창이 달 경계를 걸치므로
+# 달 단위로는 한 달 더 담아 둬야 3개월 창이 온전히 덮인다.
+RECENT_MONTHS = 4
 
 _print_lock = threading.Lock()
 _stop = threading.Event()
@@ -561,12 +562,10 @@ def main():
     a = ap.parse_args()
 
     today = date.today()
-    if a.end:
-        end = a.end
-    elif today.month > 1:
-        end = "%d%02d" % (today.year, today.month - 1)
-    else:
-        end = "%d12" % (today.year - 1)
+    # 이번 달까지 받는다. 신고 기한(계약 후 30일) 때문에 이번 달은 아직 덜 찬
+    # 상태지만, '신규 거래' 탭은 오늘 기준 최근 몇 달을 보는 화면이라 이번 달이
+    # 빠지면 의미가 없다. 덜 찬 달이라는 건 화면에서 건수로 드러난다.
+    end = a.end or ("%d%02d" % (today.year, today.month))
     start = a.start or ("%d%s" % (int(end[:4]) - 9, end[4:6]))
     yms = months(start, end)
     dtypes = [t for t in a.types.split(",") if t in ENDPOINTS]

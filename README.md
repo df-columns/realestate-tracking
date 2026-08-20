@@ -122,15 +122,20 @@ RTDB `".read": true`). 국토부 공개 실거래가라 문제는 없지만 쓰�
 
 `index.html` 은 아래 순서로 첫 성공까지 시도한다.
 
+기준은 `location.protocol` 이다.
+
 | 상황 | 1순위 | 2순위 | 3순위 |
 |---|---|---|---|
-| Hosting 에 올라간 페이지 | `data/apt_data.json` (같은 폴더) | `data/apt_data.js` | — |
-| 떼어 온 단일 파일 / `file://` | Firebase (`REMOTE_DATA_URL`) | `data/apt_data.json` | `data/apt_data.js` |
-| 이 리포지토리 (배포 전) | `data/apt_data.json` | `data/apt_data.js` | — |
+| 웹 (Hosting · Pages · 로컬 서버) | `data/apt_data.json` (같은 폴더) | `data/apt_data.js` | Firebase (`REMOTE_DATA_URL`) |
+| `file://` (떼어 온 단일 파일) | Firebase (`REMOTE_DATA_URL`) | `data/apt_data.json` | `data/apt_data.js` |
 
-`file://` 에서는 상대경로 `fetch` 가 브라우저에 막히기 때문에, 배포 전에 로컬에서
-보려면 `data/apt_data.js` 폴백(스크립트 태그)이 받아준다. 그래서 `collect.py` 는
-`.json` 과 `.js` 를 함께 쓴다.
+웹으로 열렸으면 자기 폴더가 우선이다. 자기 데이터가 없거나 일시적으로 안 받아질 때
+(Pages 재빌드 중 503 을 실제로 겪었다) Firebase 가 받아 준다.
+`file://` 은 옆에 데이터가 없는 게 정상이라 Firebase 를 먼저 봐서 헛된 404 를 안 낸다.
+
+`file://` 에서는 상대경로 `fetch` 가 브라우저에 막힌다. 그래서 배포 전 로컬에서 보려면
+`data/apt_data.js` 폴백(스크립트 태그)이 받아준다. `collect.py` 는 `.json` 과 `.js` 를
+함께 쓴다.
 
 크로스 오리진 `fetch` 는 `firebase.json` 의 `Access-Control-Allow-Origin: *`
 헤더(`/data/**`)로 열어 뒀다. 데이터는 5분 캐시, `index.html` 은 `no-cache`.
@@ -159,9 +164,8 @@ curl -o index.html https://realestatetracking-89d37.web.app/
 껍데기만 파일이고 데이터는 매번 Firebase 에서 받으므로, 파일을 다시 보내지 않아도
 받는 사람은 늘 최신 데이터를 본다. 화면 기능을 고쳤을 때만 파일을 다시 주면 된다.
 
-주의: 리포 안의 `index.html`(소스)은 `REMOTE_DATA_URL` 이 비어 있어 파일 하나로는
-동작하지 않는다. 같은 폴더에 `data/` 가 있어야 한다. 배포 시 `publish.py` 가 주소를
-채워 넣은 사본을 만든다.
+소스 `index.html` 의 `REMOTE_DATA_URL` 에도 Firebase 주소가 들어 있으므로 리포에서 받은
+파일도 그대로 동작한다. `publish.py` 는 배포할 때 그 줄의 값을 그때의 주소로 다시 쓴다.
 
 ## 자동 갱신
 
@@ -312,11 +316,21 @@ py -3 update.py --push           # 검증 후 커밋·푸시 (Pages + Firebase �
 | 거래유형 | 매매 · 전세 |
 | 정렬 | 최신순 · 가격순 · 변동률순 |
 
+기간은 **위쪽 관찰기간 설정과 무관하게 항상 오늘에서 거꾸로 자른다.** 달 단위가 아니라
+날짜 단위라(예: 2026.06.20 ~ 2026.08.20) 이번 달 거래가 바로 들어온다. 관찰기간을
+6개월이나 10년으로 바꿔도 이 탭은 그대로다.
+
+그래서 `collect.py` 는 **이번 달까지** 받는다. 신고 기한(계약 후 30일) 때문에 이번 달은
+아직 덜 찬 상태다 — 다 찬 달이 월 1,000건 남짓인데 8월 20일 기준 8월분은 319건이었다.
+덜 찼다는 건 급지 머리의 건수로 드러난다.
+
 전용면적은 상단 전역 필터(59·84)를 따른다. 급지가 없는 단지는 급지별로 묶을 수
 없으므로 제외한다. 칸을 누르면 그 단지의 상세 팝업이 열린다.
+최신 거래가 한 달 넘게 없으면 안내문이 갱신이 밀렸다고 알린다.
 
 데이터는 `collect.py` 가 `apt_data.json` 에 `recent` 항목으로 싣는다. 최근
-`RECENT_MONTHS`(기본 3)개월치 개별 거래이고, 3개월이면 약 3,500건 · gzip 15KB 정도다.
+`RECENT_MONTHS`(기본 4)개월치 개별 거래다. 화면이 날짜로 자르는 창이 달 경계를
+걸치므로 달 단위로는 한 달 더 담아 둔다. 약 3,800건 · gzip 15KB 정도다.
 이 항목이 없는 옛 데이터로 열면 탭이 안내 문구를 띄운다.
 
 ### 3. 그룹 추이

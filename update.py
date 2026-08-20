@@ -54,9 +54,11 @@ def run(args, label):
         raise RuntimeError("%s 실패 (exit %d)" % (label, rc))
 
 
-def last_month():
+def this_month():
+    """이번 달까지 받는다. collect.py 의 기본 end 와 같아야 한다 —
+    여기서 지난달을 넘기면 이번 달 캐시가 안 생겨 '신규 거래' 가 비어 버린다."""
     t = date.today()
-    return "%d12" % (t.year - 1) if t.month == 1 else "%d%02d" % (t.year, t.month - 1)
+    return "%d%02d" % (t.year, t.month)
 
 
 def shift_month(ym, back):
@@ -170,7 +172,7 @@ def main():
                 cmd += ["--rate", str(args.rate)]
             run(cmd, "전체 재수집 (10년)")
         elif not args.aggregate_only:
-            end = last_month()
+            end = this_month()
             start = shift_month(end, args.recent - 1)
             cmd = ["collect.py", "--start", start, "--end", end, "--refresh"]
             if args.rate:

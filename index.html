@@ -2222,6 +2222,14 @@ function ymdLabel(v){
   var s = String(v);
   return s.slice(0,4) + "." + s.slice(4,6) + "." + s.slice(6,8);
 }
+/* 신규 거래는 관찰기간과 무관하게 '오늘'에서 거꾸로 자른다.
+   달 단위가 아니라 날짜 단위여서 이번 달 거래가 바로 들어온다. */
+function ymdOf(d){ return d.getFullYear()*10000 + (d.getMonth()+1)*100 + d.getDate(); }
+function ymdMonthsAgo(n){
+  var d = new Date();
+  d.setMonth(d.getMonth() - n);
+  return ymdOf(d);
+}
 function areaIdx(){ return S.area === "59" ? 0 : 1; }
 function dealsOf(cx){
   var ci = C.indexOf(cx);
@@ -2266,24 +2274,28 @@ function renderNew(){
   }
 
   var ai = areaIdx(), ti = (S.newType === "rent" ? 1 : 0);
-  var endYm = +META.end, fromYm = addMonths(endYm, -(S.newWin - 1));
-  if(RECENT_FROM && fromYm < RECENT_FROM) fromYm = RECENT_FROM;
+  var todayYmd = ymdOf(new Date()), fromYmd = ymdMonthsAgo(S.newWin);
 
-  var items = [];
+  var items = [], latest = 0;
   RECENT.forEach(function(r){
     if(r[1] !== ai || r[2] !== ti) return;
-    if(Math.floor(r[3]/100) < fromYm) return;
     var cx = C[r[0]];
     if(!cx || !cx.tier) return;                 // 급지 없는 단지는 제외
     if(S.srcFilter !== "all" && cx.src !== S.srcFilter) return;
+    if(r[3] > latest) latest = r[3];
+    if(r[3] < fromYmd) return;
     items.push({r: r, cx: cx, d: dealDelta(cx, r)});
   });
 
   note.textContent =
-    ymLabel(fromYm) + " ~ " + ymLabel(endYm) + " 사이에 체결된 개별 거래 " +
-    items.length.toLocaleString() + "건을 급지별로 묶었습니다. " +
+    ymdLabel(fromYmd) + " ~ " + ymdLabel(todayYmd) + " 사이에 체결된 개별 거래 " +
+    items.length.toLocaleString() + "건입니다. 위쪽 관찰기간 설정과 무관하게 " +
+    "항상 오늘에서 거꾸로 자릅니다. " +
     "칸의 값은 실제 체결가이고, 변동률은 그 거래 직전 12개월 월중위값 대비입니다. " +
-    "칸을 누르면 그 단지의 추이와 체결 내역이 열립니다.";
+    "칸을 누르면 그 단지의 추이와 체결 내역이 열립니다." +
+    // 최신 거래가 한 달도 넘게 없으면 데이터가 밀린 것이다. 그때만 알린다.
+    (latest && latest < ymdMonthsAgo(1)
+      ? " 이 데이터의 마지막 거래는 " + ymdLabel(latest) + " — 갱신이 밀렸습니다." : "");
 
   scale.appendChild(el("span","flabel","직전 12개월 대비 저가"));
   var leg = el("span","scale");
@@ -2295,7 +2307,11 @@ function renderNew(){
 
   if(!items.length){
     grid.appendChild(el("div","empty",
-      "이 조건에 해당하는 거래가 없습니다. 기간을 늘리거나 거래유형·전용면적을 바꿔보세요."));
+      latest
+        ? "최근 " + S.newWin + "개월(" + ymdLabel(fromYmd) + " 이후)에 해당하는 거래가 " +
+          "없습니다. 이 데이터의 마지막 거래는 " + ymdLabel(latest) + "이니 " +
+          "기간을 늘리거나 데이터를 갱신하세요."
+        : "이 조건에 해당하는 거래가 없습니다. 거래유형·전용면적을 바꿔보세요."));
     return;
   }
 
