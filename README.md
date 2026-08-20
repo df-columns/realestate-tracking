@@ -204,7 +204,49 @@ curl -o index.html https://realestatetracking-89d37.web.app/
 신고 기한(계약 후 30일) 때문에 **변하는 건 최근 몇 달뿐이다.** 일일 한도(보통 10,000회)
 대비 3% 수준이다.
 
-### 작업 스케줄러 등록
+### 상시 켜두는 PC 에 설치하기 (권장)
+
+수집은 한국 네트워크에서만 나갈 수 있다. 상시 켜둔 PC 가 있으면 그게 가장 낫다 —
+주말·휴가에도 돌고, 클라우드 가입이나 카드가 필요 없다.
+
+그 PC 에서 **한 번만** 실행한다.
+
+```powershell
+# 이 리포를 아무 데나 받아서 스크립트만 꺼내 쓰거나, 아래 한 줄로 바로
+irm https://raw.githubusercontent.com/df-columns/realestate-tracking/main/setup_runner.ps1 -OutFile setup_runner.ps1
+powershell -ExecutionPolicy Bypass -File setup_runner.ps1
+```
+
+스크립트가 순서대로 한다.
+
+| 단계 | 하는 일 |
+|---|---|
+| 1 | python · git · ssh-keygen 확인 (없으면 설치 링크를 알려주고 멈춘다) |
+| 2 | 배포키 생성 → 공개키를 찍어 주고 리포에 등록하라고 멈춘다 |
+| 3 | clone 후 **푸시 권한을 그 자리에서 확인** (`push --dry-run`) |
+| 4 | `requests` · `truststore` 설치 |
+| 5 | `apikey.txt` 확인 — 없으면 붙여넣게 한다 |
+| 6 | 국토부 API 실제 호출 1건으로 접속 확인 |
+| 7 | 첫 수집 — 캐시가 없으면 10년 전체(약 7,200요청 · 15~20분) |
+| 8 | 작업 스케줄러에 매일 04:37 등록 |
+
+왜 배포키인가: 무인 실행에서는 Windows 자격 증명 관리자를 못 읽을 수 있다. 배포키는
+파일이라 로그오프 상태에서도 동작하고, **이 리포 하나에만** 쓰기 권한이 있어 계정
+전체가 걸리지 않는다. 등록은 `Settings → Deploy keys` 에서 하고 *Allow write access*
+를 반드시 켠다.
+
+캐시 67MB 를 이 PC 에서 복사해 가면 7단계의 전체 수집을 건너뛸 수 있다. 안 옮겨도
+한 번의 전체 수집은 일일 한도(보통 10,000회) 안에 들어간다.
+
+설치 후:
+
+```
+schtasks /run /tn "실거래가 갱신"      # 즉시 실행
+schtasks /delete /tn "실거래가 갱신" /f  # 해제
+type daily.log                          # 로그
+```
+
+### 이 PC 에 직접 등록할 때
 
 ```
 schtasks /create /tn "실거래가 갱신" /sc daily /st 06:30 /f /tr "\"C:\Users\sw.shin\Desktop\claude code 프로젝트\027_실거래가 추이\daily.bat\""
