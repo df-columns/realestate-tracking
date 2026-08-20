@@ -51,6 +51,11 @@ ENDPOINTS = {
 AREA_BUCKETS = {"59": (52.0, 68.0), "84": (74.0, 92.0)}
 AREA_TARGET = {"59": 59.9, "84": 84.9}
 
+# '신규 거래' 탭은 월별 집계가 아니라 개별 거래(거래일·층·금액)를 보여준다.
+# 최근 이 개월 수만큼의 거래를 apt_data.json 에 따로 싣는다. 3개월이면 약 3,500건
+# (gzip 30KB 수준)이라 화면 쪽에서 1~3개월로 좁혀 보게 하기에 충분하다.
+RECENT_MONTHS = 3
+
 _print_lock = threading.Lock()
 _stop = threading.Event()
 
@@ -373,6 +378,24 @@ def load_complex_info():
         return {}
 
 
+def deal_ymd(r):
+    """거래일을 YYYYMMDD 정수로. 일자가 비었거나 깨졌으면 None."""
+    try:
+        y, m, d = int(r["y"]), int(r["m"]), int(r["d"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (1900 < y < 2100 and 1 <= m <= 12 and 1 <= d <= 31):
+        return None
+    return y * 10000 + m * 100 + d
+
+
+def floor_of(r):
+    try:
+        return int((r.get("floor") or "").strip())
+    except ValueError:
+        return None
+
+
 def aggregate(dtypes, yms):
     matchers = build_matchers()
     info = load_complex_info()
@@ -405,8 +428,12 @@ def aggregate(dtypes, yms):
                             pool[mt["c"]["id"]][dtype].append(r)
                             break
 
+    # '신규 거래' 탭용 개별 거래. 급지가 없는 단지는 급지별로 묶을 수 없어 제외한다.
+    recent_from = yms[-RECENT_MONTHS] if len(yms) >= RECENT_MONTHS else yms[0]
+    recent_rows = []
+
     complexes_out, report = [], []
-    for c in COMPLEXES:
+    for ci, c in enumerate(COMPLEXES):
         entry = dict((k, c[k]) for k in
                      ("id", "region", "sgg", "dong", "name", "tier", "area_name", "src"))
         entry["sgg_label"] = SGG_LABEL.get(c["sgg"], c["sgg"])
@@ -426,9 +453,11 @@ def aggregate(dtypes, yms):
         entry["dong_cnt"] = inf.get("dong_cnt")    # 동 수
         entry["kapt_name"] = inf.get("kapt_name")
         entry["areas"] = {}
-        for akey in ("59", "84"):
+        for ai, akey in enumerate(("59", "84")):
             lo, hi = AREA_BUCKETS[akey]
-            info = {"rep": None}
+            # 이름을 area 로 둔다. 예전엔 info 를 재사용해서 바깥의 단지 제원 dict 을
+            # 두 번째 단지부터 덮어써 units/built 가 전부 None 이 됐다.
+            area = {"rep": None}
             rep = None
             for dtype in dtypes:
                 bucket = [r for r in pool[c["id"]][dtype] if lo <= r["area"] < hi]
@@ -436,10 +465,18 @@ def aggregate(dtypes, yms):
                     rep, sel = pick_area_group(bucket, AREA_TARGET[akey])
                 else:
                     sel = [r for r in bucket if abs(r["area"] - rep) <= 1.0]
-                info[dtype] = monthly(sel)
-                info["n_" + dtype] = len(sel)
-            info["rep"] = rep
-            entry["areas"][akey] = info
+                area[dtype] = monthly(sel)
+                area["n_" + dtype] = len(sel)
+
+                if c.get("tier"):
+                    ti = 0 if dtype == "trade" else 1
+                    for r in sel:
+                        ymd = deal_ymd(r)
+                        if ymd is not None and str(ymd)[:6] >= recent_from:
+                            recent_rows.append(
+                                [ci, ai, ti, ymd, r["price"], floor_of(r)])
+            area["rep"] = rep
+            entry["areas"][akey] = area
         complexes_out.append(entry)
 
         tot = sum(len(pool[c["id"]][d]) for d in dtypes)
@@ -480,9 +517,13 @@ def aggregate(dtypes, yms):
         "regions": REGION_ORDER,
         "tiers": TIER_ORDER,
         "has_info": bool(info),
+        "recent_from": recent_from,
+        "recent_months": RECENT_MONTHS,
         "sample": False,
     }
-    out = {"meta": meta, "complexes": complexes_out}
+    recent_rows.sort(key=lambda r: -r[3])          # 최신 거래 먼저
+    out = {"meta": meta, "complexes": complexes_out,
+           "recent": {"from": recent_from, "rows": recent_rows}}
     os.makedirs(DATA, exist_ok=True)
     blob = json.dumps(out, ensure_ascii=False, separators=(",", ":"))
     # Firebase Hosting 배포용 — index.html 이 fetch 하는 원본
@@ -500,7 +541,8 @@ def aggregate(dtypes, yms):
 
     size = os.path.getsize(os.path.join(DATA, "apt_data.json")) / 1024.0
     zero = sum(1 for r in report if "매칭 0건" in r)
-    log("집계 완료: data/apt_data.json (%.0f KB) · 매칭 0건 단지 %d개" % (size, zero))
+    log("집계 완료: data/apt_data.json (%.0f KB) · 매칭 0건 단지 %d개 · "
+        "신규 거래 %s건 (%s~)" % (size, zero, format(len(recent_rows), ","), recent_from))
     log("→ data/match_report.md 확인 후 complexes.py 의 aliases/dongs 를 보정하고 "
         "`py -3 collect.py --aggregate-only` 로 재집계하세요.")
 

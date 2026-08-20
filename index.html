@@ -173,6 +173,9 @@ table.heat .rowsub{font-weight:400;color:var(--muted);font-size:11px}
   border-radius:10px;padding:8px 11px;display:flex;flex-direction:column;
   justify-content:center;border:1px solid var(--border)
 }
+/* 신규 거래는 한 급지에 칸이 수십 개씩 붙어 머리가 아주 길어진다.
+   가운데 정렬하면 라벨이 화면 밖으로 밀리므로 위에 붙여 따라오게 한다. */
+.tiergrid.deals .tierhead{justify-content:flex-start;position:sticky;top:8px;align-self:start}
 .tierhead .tname{font-size:14px;font-weight:700;letter-spacing:-.2px;display:flex;
   align-items:center;gap:6px}
 .tierhead .tval{font-size:16px;font-weight:650;margin-top:2px;letter-spacing:-.3px;
@@ -321,6 +324,7 @@ td.cur{font-weight:650}
 
 <div class="tabs" role="tablist">
   <button role="tab" data-tab="map" aria-selected="true">급지 지도</button>
+  <button role="tab" data-tab="new" aria-selected="false">신규 거래</button>
   <button role="tab" data-tab="region" aria-selected="false">그룹 추이</button>
   <button role="tab" data-tab="compare" aria-selected="false">단지 비교</button>
   <button role="tab" data-tab="table" aria-selected="false">상세 표</button>
@@ -345,7 +349,28 @@ td.cur{font-weight:650}
   </div>
 </section>
 
-<!-- ══ 탭 1: 상세 표 ═══════════════════════════════════════════ -->
+<!-- ══ 탭 1: 신규 거래 ═════════════════════════════════════════ -->
+<section id="tab-new" hidden>
+  <div class="filters sub2">
+    <div class="fgroup"><span class="flabel">기간</span>
+      <div class="seg" id="segNewWin"></div>
+    </div>
+    <div class="fgroup"><span class="flabel">거래유형</span>
+      <div class="seg" id="segNewType"></div>
+    </div>
+    <div class="fgroup"><span class="flabel">정렬</span>
+      <div class="seg" id="segNewSort"></div>
+    </div>
+    <div class="fgroup cmpbar" id="newScale"></div>
+  </div>
+  <div class="card">
+    <h2 id="newTitle"></h2>
+    <p class="note" id="newNote"></p>
+    <div class="tiergrid deals" id="newGrid"></div>
+  </div>
+</section>
+
+<!-- ══ 탭 2: 상세 표 ═══════════════════════════════════════════ -->
 <section id="tab-table" hidden>
   <div class="filters sub2">
     <div class="fgroup"><span class="flabel">변동 구간</span>
@@ -468,6 +493,7 @@ td.cur{font-weight:650}
       </div>
     </div>
     <div id="dCharts"></div>
+    <div id="dTables"></div>
   </div>
 </div>
 
@@ -566,6 +592,17 @@ var MAX_SEL = 8;
 var TIERS = META.tiers || [1,2,3,4,5,6,7,8,9,10];
 var HAS_TIER = C.some(function(c){ return c.tier != null; });
 
+/* 개별 체결 내역 — collect.py 가 최근 RECENT_MONTHS 개월치만 싣는다.
+   한 행 = [단지 인덱스, 면적(0=59·1=84), 유형(0=매매·1=전세), 거래일 YYYYMMDD, 가격(만원), 층]
+   이 항목이 없는 옛 데이터로도 화면이 떠야 하므로 빈 배열로 받는다. */
+var RECENT = (D.recent && D.recent.rows) || [];
+var RECENT_FROM = (D.recent && D.recent.from) ? +D.recent.from : null;
+var RECENT_BY = {};                       // "단지idx|면적idx" -> 거래 배열 (최신순)
+RECENT.forEach(function(r){
+  var k = r[0] + "|" + r[1];
+  (RECENT_BY[k] = RECENT_BY[k] || []).push(r);
+});
+
 var S = {
   years: 10, startYm: null, endYm: null, rangeKey: "m36",
   area: "84", smooth: true, smoothWin: 3, gran: "m", tab: "map",
@@ -576,6 +613,7 @@ var S = {
   baseTier: 6, baseRegion: null,     // 갭·비율의 기준 그룹
   periods: [12,36,60,120],
   tierFilter: [], srcFilter: "all", tblQuery: "",   // srcFilter: all | list
+  newWin: 2, newType: "trade", newSort: "date",   // 신규 거래 탭
   cmpMode: "all",                        // all = 매매·전세·전세가율 3개 차트
   baseId: null,                          // 기준 단지 (선택 시 상대가격 %)
   sortKey: "tier", sortDir: 1,
@@ -1485,6 +1523,11 @@ function openDetail(id){
       {height: 210, kind: g.k, metric: "price"});
   });
 
+  var tables = document.getElementById("dTables");
+  tables.textContent = "";
+  tables.appendChild(dealTable(cx));
+  tables.appendChild(monthlyTable(cx, yms));
+
   var add = document.getElementById("dAdd");
   add.textContent = (S.sel.indexOf(id) >= 0) ? "비교에서 빼기" : "비교에 담기";
   document.getElementById("detail").hidden = false;
@@ -2175,6 +2218,266 @@ function renderCompareTable(series, yms){
   if(!tb.children.length) wrap.appendChild(el("div","empty","선택한 조건에 해당하는 거래가 없습니다."));
 }
 
+/* ══ 신규 거래 (개별 체결 내역) ═══════════════════════════════ */
+function ymdLabel(v){
+  var s = String(v);
+  return s.slice(0,4) + "." + s.slice(4,6) + "." + s.slice(6,8);
+}
+function areaIdx(){ return S.area === "59" ? 0 : 1; }
+function dealsOf(cx){
+  var ci = C.indexOf(cx);
+  return ci < 0 ? [] : (RECENT_BY[ci + "|" + areaIdx()] || []);
+}
+
+/* 그 거래 직전 12개월의 월중위값들의 중앙값. 신규 거래가 싸게/비싸게 붙었는지 본다. */
+function baseMed(cx, tkey, ym){
+  var a = cx.areas && cx.areas[S.area];
+  if(!a) return null;
+  var rows = a[tkey] || [], from = addMonths(ym, -12), vals = [];
+  for(var i=0;i<rows.length;i++)
+    if(rows[i][0] < ym && rows[i][0] >= from) vals.push(rows[i][1]);
+  return vals.length ? median(vals) : null;
+}
+function dealDelta(cx, r){
+  var b = baseMed(cx, r[2] === 0 ? "trade" : "rent", Math.floor(r[3]/100));
+  return (b == null || !b) ? null : (r[4]/b - 1) * 100;
+}
+
+function noRecentMsg(){
+  return "이 데이터에는 개별 체결 내역이 없습니다. " +
+         "collect.py 를 다시 실행하면 최근 " + (META.recent_months || 3) +
+         "개월 거래가 들어옵니다.";
+}
+
+function renderNew(){
+  var grid = document.getElementById("newGrid");
+  var title = document.getElementById("newTitle");
+  var note = document.getElementById("newNote");
+  var scale = document.getElementById("newScale");
+  grid.textContent = ""; scale.textContent = "";
+
+  var tLabel = S.newType === "rent" ? "전세" : "매매";
+  title.textContent = "신규 거래 — 전용 " + S.area + "㎡ · " + tLabel +
+                      " · 최근 " + S.newWin + "개월";
+
+  if(!RECENT.length){
+    note.textContent = "";
+    grid.appendChild(el("div","empty", noRecentMsg()));
+    return;
+  }
+
+  var ai = areaIdx(), ti = (S.newType === "rent" ? 1 : 0);
+  var endYm = +META.end, fromYm = addMonths(endYm, -(S.newWin - 1));
+  if(RECENT_FROM && fromYm < RECENT_FROM) fromYm = RECENT_FROM;
+
+  var items = [];
+  RECENT.forEach(function(r){
+    if(r[1] !== ai || r[2] !== ti) return;
+    if(Math.floor(r[3]/100) < fromYm) return;
+    var cx = C[r[0]];
+    if(!cx || !cx.tier) return;                 // 급지 없는 단지는 제외
+    if(S.srcFilter !== "all" && cx.src !== S.srcFilter) return;
+    items.push({r: r, cx: cx, d: dealDelta(cx, r)});
+  });
+
+  note.textContent =
+    ymLabel(fromYm) + " ~ " + ymLabel(endYm) + " 사이에 체결된 개별 거래 " +
+    items.length.toLocaleString() + "건을 급지별로 묶었습니다. " +
+    "칸의 값은 실제 체결가이고, 변동률은 그 거래 직전 12개월 월중위값 대비입니다. " +
+    "칸을 누르면 그 단지의 추이와 체결 내역이 열립니다.";
+
+  scale.appendChild(el("span","flabel","직전 12개월 대비 저가"));
+  var leg = el("span","scale");
+  ["--badbg3","--badbg2","--badbg","--goodbg","--goodbg2","--goodbg3"].forEach(function(k){
+    var i = el("i"); i.style.background = cssVar(k); leg.appendChild(i);
+  });
+  scale.appendChild(leg);
+  scale.appendChild(el("span","flabel","고가"));
+
+  if(!items.length){
+    grid.appendChild(el("div","empty",
+      "이 조건에 해당하는 거래가 없습니다. 기간을 늘리거나 거래유형·전용면적을 바꿔보세요."));
+    return;
+  }
+
+  var byTier = {};
+  items.forEach(function(x){ (byTier[x.cx.tier] = byTier[x.cx.tier] || []).push(x); });
+
+  var tip = el("div","tip"); tip.style.position = "fixed";
+  grid.appendChild(tip);
+
+  TIERS.forEach(function(t){
+    var list = byTier[t];
+    if(!list || !list.length) return;
+
+    list.sort(function(a,b){
+      if(S.newSort === "price") return b.r[4] - a.r[4];
+      if(S.newSort === "delta"){
+        if(a.d == null && b.d == null) return 0;
+        if(a.d == null) return 1;
+        if(b.d == null) return -1;
+        return b.d - a.d;
+      }
+      return b.r[3] - a.r[3];                   // 최신순
+    });
+
+    var prices = list.map(function(x){ return x.r[4]; });
+    var dels = list.filter(function(x){ return x.d != null; }).map(function(x){ return x.d; });
+
+    var row = el("div","tierrow");
+    var head = el("div","tierhead");
+    head.style.background = cssVar("--tg" + t);
+    var nm = el("div","tname");
+    var dot = el("span","tdot"); dot.style.background = tierColor(t);
+    nm.appendChild(dot);
+    nm.appendChild(document.createTextNode(t + "급지"));
+    head.appendChild(nm);
+    head.appendChild(el("div","tval", fmtMoney(median(prices))));
+    var sub = el("div","tsub");
+    if(dels.length){
+      var md = median(dels);
+      sub.appendChild(el("span", md > 0 ? "up" : (md < 0 ? "dn" : ""),
+        (md > 0 ? "+" : "") + md.toFixed(1) + "%"));
+      sub.appendChild(document.createTextNode(" 중위 변동"));
+    } else sub.textContent = "비교 불가";
+    head.appendChild(sub);
+    head.appendChild(el("div","tsub", list.length + "건"));
+    var names = [];
+    list.forEach(function(x){ if(names.indexOf(x.cx.name) < 0) names.push(x.cx.name); });
+    head.appendChild(el("div","tsub", names.length + "개 단지"));
+    row.appendChild(head);
+
+    var cells = el("div","tiercells");
+    list.forEach(function(x){
+      var cell = el("div","cell");
+      cell.style.background = deltaTint(x.d, false);
+      var b = el("button","cellbody");
+      b.type = "button";
+      b.appendChild(el("div","cnm", x.cx.name));
+      b.appendChild(el("div","cval", fmtMoney(x.r[4])));
+      var dl = el("div","cdl");
+      dl.appendChild(el("span", null,
+        String(x.r[3]).slice(4,6) + "." + String(x.r[3]).slice(6,8) +
+        (x.r[5] == null ? "" : " · " + x.r[5] + "층")));
+      if(x.d != null)
+        dl.appendChild(el("span", x.d > 0 ? "up" : (x.d < 0 ? "dn" : "na"),
+          " " + (x.d > 0 ? "+" : "") + x.d.toFixed(1) + "%"));
+      b.appendChild(dl);
+      b.addEventListener("click", function(){ openDetail(x.cx.id); });
+      b.addEventListener("pointerenter", function(){
+        tip.textContent = "";
+        tip.appendChild(el("div","th",
+          x.cx.name + " · " + sggLabel(x.cx) + " " + x.cx.dong));
+        [["거래일", ymdLabel(x.r[3])],
+         ["체결가", fmtMoney(x.r[4])],
+         ["층", x.r[5] == null ? "—" : x.r[5] + "층"],
+         ["직전 12개월 중위",
+          (function(){
+            var bm = baseMed(x.cx, x.r[2] === 0 ? "trade" : "rent", Math.floor(x.r[3]/100));
+            return bm == null ? "—" : fmtMoney(bm);
+          })()]
+        ].forEach(function(p){
+          var line = el("div","r");
+          line.appendChild(el("span","n", p[0]));
+          line.appendChild(el("span","v", p[1]));
+          tip.appendChild(line);
+        });
+        var bb = b.getBoundingClientRect();
+        tip.style.opacity = 1;
+        tip.style.left = Math.min(window.innerWidth - 230, bb.left) + "px";
+        tip.style.top = (bb.bottom + 6) + "px";
+      });
+      b.addEventListener("pointerleave", function(){ tip.style.opacity = 0; });
+      cell.appendChild(b);
+      cells.appendChild(cell);
+    });
+    row.appendChild(cells);
+    grid.appendChild(row);
+  });
+}
+
+/* ══ 팝업 표 — 그래프만으로는 실제 체결이 안 보인다 ═══════════ */
+function dealTable(cx){
+  var box = el("div","cmpblock");
+  box.appendChild(el("h3","blockh",
+    "체결 내역 — 전용 " + S.area + "㎡" +
+    (RECENT_FROM ? " · " + ymLabel(RECENT_FROM) + " 이후" : "")));
+  if(!RECENT.length){
+    box.appendChild(el("div","empty", noRecentMsg()));
+    return box;
+  }
+  var rows = dealsOf(cx);
+  if(!rows.length){
+    box.appendChild(el("div","empty","이 기간에 해당 평형 거래가 없습니다."));
+    return box;
+  }
+  var wrap = el("div","tblwrap" + (rows.length > 14 ? " tall" : ""));
+  var t = el("table","grid"), thead = el("thead"), tr = el("tr");
+  ["거래일","유형","체결가","층","직전 12개월 대비"].forEach(function(h, i){
+    tr.appendChild(el("th", (i === 0 ? "l " : "") + "static", h));
+  });
+  thead.appendChild(tr); t.appendChild(thead);
+  var tb = el("tbody");
+  rows.forEach(function(r){
+    var d = dealDelta(cx, r), row = el("tr");
+    row.appendChild(el("td","l", ymdLabel(r[3])));
+    row.appendChild(el("td", null, r[2] === 0 ? "매매" : "전세"));
+    row.appendChild(el("td", null, fmtMoney(r[4])));
+    row.appendChild(el("td", null, r[5] == null ? "—" : r[5] + "층"));
+    var td = el("td");
+    td.appendChild(d == null ? el("span","na","—")
+      : el("span", d > 0 ? "up" : (d < 0 ? "dn" : "na"),
+           (d > 0 ? "+" : "") + d.toFixed(1) + "%"));
+    row.appendChild(td);
+    tb.appendChild(row);
+  });
+  t.appendChild(tb); wrap.appendChild(t); box.appendChild(wrap);
+  return box;
+}
+
+function monthlyTable(cx, yms){
+  var box = el("div","cmpblock");
+  box.appendChild(el("h3","blockh","월별 실거래 — 전용 " + S.area + "㎡ (보정 없는 원값)"));
+  var a = cx.areas && cx.areas[S.area];
+  if(!a){
+    box.appendChild(el("div","empty","해당 평형 데이터가 없습니다."));
+    return box;
+  }
+  var idx = {};                                  // ym -> {trade: row, rent: row}
+  ["trade","rent"].forEach(function(tk){
+    (a[tk] || []).forEach(function(r){ (idx[r[0]] = idx[r[0]] || {})[tk] = r; });
+  });
+  var keys = yms.filter(function(ym){ return idx[ym]; })
+                .sort(function(x, y){ return y - x; });
+  if(!keys.length){
+    box.appendChild(el("div","empty","이 기간에 해당 평형 거래가 없습니다."));
+    return box;
+  }
+  var wrap = el("div","tblwrap" + (keys.length > 14 ? " tall" : ""));
+  var t = el("table","grid"), thead = el("thead"), tr = el("tr");
+  ["월","매매 중위","매매 건수","매매 최저~최고","전세 중위","전세 건수","전세가율"]
+    .forEach(function(h, i){
+      tr.appendChild(el("th", (i === 0 ? "l " : "") + "static", h));
+    });
+  thead.appendChild(tr); t.appendChild(thead);
+  var tb = el("tbody");
+  keys.forEach(function(ym){
+    var e = idx[ym], tr2 = e.trade, rn = e.rent, row = el("tr");
+    row.appendChild(el("td","l", ymLabel(ym)));
+    row.appendChild(el("td", null, tr2 ? fmtMoney(tr2[1]) : "—"));
+    row.appendChild(el("td", null, tr2 ? tr2[2] + "건" : "—"));
+    row.appendChild(el("td", null,
+      tr2 ? fmtMoney(tr2[3]) + " ~ " + fmtMoney(tr2[4]) : "—"));
+    row.appendChild(el("td", null, rn ? fmtMoney(rn[1]) : "—"));
+    row.appendChild(el("td", null, rn ? rn[2] + "건" : "—"));
+    row.appendChild(el("td", null,
+      (tr2 && rn && tr2[1]) ? (rn[1] / tr2[1] * 100).toFixed(1) + "%" : "—"));
+    tb.appendChild(row);
+  });
+  t.appendChild(tb); wrap.appendChild(t); box.appendChild(wrap);
+  return box;
+}
+
 /* ══ CSV 내려받기 ═══════════════════════════════════════════ */
 function downloadCsv(){
   var yms = rangeYms(), series = selectedSeries(yms);
@@ -2309,6 +2612,14 @@ function buildControls(){
     function(v){ S.smoothWin = v; S.smooth = (v > 0); refresh(); });
   seg("segMapVal", MAP_VALS.map(function(x){ return {v:x.v, label:x.l}; }),
     function(){ return S.mapVal; }, function(v){ S.mapVal = v; refresh(); });
+  seg("segNewWin",
+    [{v:1,label:"1개월"},{v:2,label:"2개월"},{v:3,label:"3개월"}],
+    function(){ return S.newWin; }, function(v){ S.newWin = v; refresh(); });
+  seg("segNewType", [{v:"trade",label:"매매"},{v:"rent",label:"전세"}],
+    function(){ return S.newType; }, function(v){ S.newType = v; refresh(); });
+  seg("segNewSort",
+    [{v:"date",label:"최신순"},{v:"price",label:"가격순"},{v:"delta",label:"변동률순"}],
+    function(){ return S.newSort; }, function(v){ S.newSort = v; refresh(); });
   seg("segSrc2", [{v:"all",label:"삼토시50+급지대표"},{v:"list",label:"삼토시50"}],
     function(){ return S.srcFilter; }, function(v){ S.srcFilter = v; refresh(); });
   seg("segArea", [{v:"59",label:"59㎡"},{v:"84",label:"84㎡"}],
@@ -2435,13 +2746,14 @@ function setTab(name){
   var tabs = document.querySelectorAll(".tabs button");
   for(var i=0;i<tabs.length;i++)
     tabs[i].setAttribute("aria-selected", String(tabs[i].dataset.tab === name));
-  ["map","region","compare","table"].forEach(function(t){
+  ["map","new","region","compare","table"].forEach(function(t){
     document.getElementById("tab-" + t).hidden = (t !== name);
   });
   render();
 }
 function render(){
   if(S.tab === "map") renderMap();
+  else if(S.tab === "new") renderNew();
   else if(S.tab === "region") renderRegion();
   else if(S.tab === "compare") renderCompare();
   else renderTables();
