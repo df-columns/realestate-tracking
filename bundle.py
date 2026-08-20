@@ -10,10 +10,12 @@ git 도, SSH 배포키도, 리포 clone 도 필요 없다 — 데이터 한 파�
 캐시(67MB)를 같이 담으므로 상시 PC 에서 10년 전체 수집을 다시 하지 않는다.
 """
 
+import argparse
 import io
 import os
 import shutil
 import sys
+import zipfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(ROOT, "dist", "수집기")
@@ -67,7 +69,18 @@ echo   [4/4] 지금 한 번 돌려 봅니다 ^(1~2분^)
 echo.
 set PYTHONIOENCODING=cp949:replace
 set PYTHONUTF8=1
-%PY% -u update.py --recent 3 --push
+
+rem 캐시가 없으면 10년 전체를 받아야 한다. --recent 3 만 돌리면 과거가 빈
+rem 데이터가 되어 update.py 의 검증에서 막힌다.
+set NCACHE=0
+if exist cache for /f %%C in ('dir /s /b cache\*.json.gz 2^>nul ^| find /c /v ""') do set NCACHE=%%C
+echo         캐시 파일 %NCACHE% 개
+if %NCACHE% LSS 5000 (
+  echo         캐시가 없어 10년 전체를 받습니다. 15~20분 걸립니다.
+  %PY% -u update.py --full --push
+) else (
+  %PY% -u update.py --recent 3 --push
+)
 if errorlevel 1 (
   echo.
   echo   [!] 시험 실행이 실패했습니다. 위 메시지를 확인하세요.
@@ -250,7 +263,30 @@ def wr(name, text, enc="utf-8-sig"):
         f.write(text)
 
 
+def zip_up(folder):
+    """옮길 게 파일 하나가 되도록 묶는다. 캐시는 이미 gz 이라 더 줄지 않으니
+    압축률보다 속도를 택한다."""
+    zpath = folder + ".zip"
+    if os.path.exists(zpath):
+        os.remove(zpath)
+    base = os.path.dirname(folder)
+    n = 0
+    with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as z:
+        for root, _d, files in os.walk(folder):
+            for f in files:
+                full = os.path.join(root, f)
+                z.write(full, os.path.relpath(full, base).replace(os.sep, "/"))
+                n += 1
+    return zpath, n
+
+
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--no-cache", action="store_true",
+                    help="캐시를 빼서 작게 만든다 (상시 PC 첫 실행이 10년 전체를 받는다)")
+    ap.add_argument("--no-zip", action="store_true", help="폴더만 만들고 zip 은 만들지 않는다")
+    args = ap.parse_args()
+
     for f in FILES:
         if not os.path.exists(os.path.join(ROOT, f)):
             sys.exit("[!] %s 가 없습니다." % f)
@@ -269,7 +305,7 @@ def main():
     # 캐시를 같이 담아 상시 PC 에서 10년 전체 수집을 다시 하지 않게 한다
     src_cache = os.path.join(ROOT, "cache")
     n_cache = 0
-    if os.path.isdir(src_cache):
+    if not args.no_cache and os.path.isdir(src_cache):
         shutil.copytree(src_cache, os.path.join(OUT, "cache"))
         for _b, _d, fs in os.walk(os.path.join(OUT, "cache")):
             n_cache += len(fs)
@@ -286,14 +322,29 @@ def main():
         for f in fs:
             total += os.path.getsize(os.path.join(base, f))
 
-    print("dist/수집기/ 생성 완료 — %.0f MB (캐시 파일 %s개)"
-          % (total / 1048576.0, format(n_cache, ",")))
+    def mb(n):
+        return n / 1048576.0
+
+    print("dist/수집기/ — %.1f MB (캐시 파일 %s개)" % (mb(total), format(n_cache, ",")))
+
+    target = OUT
+    if not args.no_zip:
+        zpath, n = zip_up(OUT)
+        print("dist/수집기.zip — %.1f MB (파일 %s개 묶음)"
+              % (mb(os.path.getsize(zpath)), format(n, ",")))
+        target = zpath
+
     print()
-    print("  1) 이 폴더를 상시 켜두는 PC 로 복사")
-    print("     %s" % OUT)
+    print("  1) 이걸 상시 켜두는 PC 로 옮기세요")
+    print("     %s" % target)
+    if not args.no_zip:
+        print("     (옮긴 뒤 우클릭 → 압축 풀기)")
     print("  2) 그 PC 에서 '설치.bat' 더블클릭")
+    if args.no_cache:
+        print()
+        print("  캐시를 뺐으므로 첫 실행이 10년 전체를 받습니다 (15~20분).")
     print()
-    print("  apikey.txt 가 들어 있으니 폴더를 외부에 공유하지 마세요.")
+    print("  apikey.txt 가 들어 있습니다. 외부에 공유하지 마세요.")
 
 
 if __name__ == "__main__":

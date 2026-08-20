@@ -210,8 +210,17 @@ curl -o index.html https://realestatetracking-89d37.web.app/
 git 도, SSH 배포키도, 리포 clone 도 필요 없다.
 
 ```bash
-py -3 bundle.py     # dist/수집기/ 생성 (약 50MB)
+py -3 bundle.py                # dist/수집기.zip  (51MB, 파일 하나)
+py -3 bundle.py --no-cache     # dist/수집기.zip  (0.3MB — 첫 실행이 10년 전체를 받는다)
+py -3 bundle.py --no-zip       # 폴더만
 ```
+
+옮기는 건 **zip 하나**다. 폴더 안 파일이 7,272개로 보이지만 7,260개는 `cache/` 안의
+압축 데이터이고, 사람이 볼 파일은 11개다.
+
+캐시를 함께 담는 쪽을 권한다. 51MB 를 한 번 옮기면 상시 PC 에서 10년 전체 수집
+(약 7,200요청 · 15~20분)을 하지 않는다. `--no-cache` 로 0.3MB 만 옮겨도 되고, 그때는
+`설치.bat` 이 캐시가 없는 것을 보고 첫 실행을 전체 수집으로 돌린다.
 
 폴더에 든 것
 
