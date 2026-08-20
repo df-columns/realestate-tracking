@@ -44,6 +44,7 @@ MIN_COMPLEXES = 90        # complexes.py 기준 99개 — 이보다 적으면 �
 MIN_YEARS = 9             # 10년치를 기대하지만 경계 달을 감안해 9년으로 본다
 MIN_ROWS = 15000          # 10년 정상 집계는 약 25,000행
 HEAD_SLACK = 12           # 가장 이른 거래가 meta.start 보다 이만큼 늦으면 과거가 비었다
+MAX_CATCHUP = 12          # 공백을 자동으로 따라잡는 상한 (12개월 = 약 800요청)
 
 
 def run(args, label):
@@ -69,6 +70,45 @@ def shift_month(ym, back):
 
 def month_span(a, b):
     return (int(b[:4]) * 12 + int(b[4:6])) - (int(a[:4]) * 12 + int(a[4:6]))
+
+
+def data_tip():
+    """이미 있는 데이터에서 거래가 잡힌 마지막 달. 없으면 None."""
+    if not os.path.exists(DATA_JSON):
+        return None
+    try:
+        with open(DATA_JSON, encoding="utf-8") as f:
+            j = json.load(f)
+    except Exception:
+        return None
+    tip = None
+    for c in j.get("complexes") or []:
+        for a in (c.get("areas") or {}).values():
+            for k in ("trade", "rent"):
+                for r in (a.get(k) or []):
+                    ym = str(r[0])
+                    if tip is None or ym > tip:
+                        tip = ym
+    return tip
+
+
+def catchup_months(want, end):
+    """휴가·PC 꺼짐으로 며칠~몇 달 비어도 돌아오는 즉시 스스로 메우게 한다.
+    마지막 거래가 잡힌 달부터 이번 달까지를 덮을 만큼 창을 넓힌다."""
+    tip = data_tip()
+    if not tip:
+        return want
+    gap = month_span(tip, end) + 1
+    if gap <= want:
+        return want
+    if gap > MAX_CATCHUP:
+        print("[!] 데이터가 %s 까지입니다 — %d개월이 비었습니다. %d개월만 메우니, "
+              "끝난 뒤 `py -3 update.py --full` 로 전체 재수집을 권합니다."
+              % (tip, gap, MAX_CATCHUP))
+        return MAX_CATCHUP
+    print("데이터가 %s 까지입니다 — 요청 창을 %d개월에서 %d개월로 넓혀 따라잡습니다."
+          % (tip, want, gap))
+    return gap
 
 
 def verify():
@@ -173,11 +213,12 @@ def main():
             run(cmd, "전체 재수집 (10년)")
         elif not args.aggregate_only:
             end = this_month()
-            start = shift_month(end, args.recent - 1)
+            recent = catchup_months(args.recent, end)
+            start = shift_month(end, recent - 1)
             cmd = ["collect.py", "--start", start, "--end", end, "--refresh"]
             if args.rate:
                 cmd += ["--rate", str(args.rate)]
-            run(cmd, "최근 %d개월 재수집 (%s~%s)" % (args.recent, start, end))
+            run(cmd, "최근 %d개월 재수집 (%s~%s)" % (recent, start, end))
             # 위 단계는 그 범위만 집계하므로 여기서 10년치로 되돌린다
             run(["collect.py", "--aggregate-only"], "전체 재집계 (10년)")
         else:
