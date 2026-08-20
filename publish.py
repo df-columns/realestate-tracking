@@ -36,6 +36,7 @@ index.html 을 "데이터 없이도 도는 단일 파일" 로 만들어 주는 �
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -47,7 +48,9 @@ SRC_HTML = os.path.join(ROOT, "index.html")
 PUBLIC = os.path.join(ROOT, "public")
 DIST = os.path.join(ROOT, "dist")
 
-PLACEHOLDER = 'var REMOTE_DATA_URL = "";'
+# 소스의 REMOTE_DATA_URL 은 이미 Firebase 주소가 들어 있다(웹에서 열렸을 때의 폴백).
+# 배포·단일파일 빌드 때는 그 값을 그때의 주소로 다시 써 넣는다.
+URL_LINE = re.compile(r'var REMOTE_DATA_URL = "[^"]*";')
 
 
 def die(msg):
@@ -76,9 +79,10 @@ def render_html(data_url):
     """index.html 을 읽어 REMOTE_DATA_URL 을 채운 문자열을 돌려준다."""
     with open(SRC_HTML, encoding="utf-8") as f:
         html = f.read()
-    if PLACEHOLDER not in html:
-        die("index.html 에서 REMOTE_DATA_URL 자리를 찾지 못했습니다. (index.html 이 수정된 듯합니다)")
-    return html.replace(PLACEHOLDER, 'var REMOTE_DATA_URL = "%s";' % data_url)
+    html, n = URL_LINE.subn('var REMOTE_DATA_URL = "%s";' % data_url, html, count=1)
+    if not n:
+        die("index.html 에서 REMOTE_DATA_URL 줄을 찾지 못했습니다. (index.html 이 수정된 듯합니다)")
+    return html
 
 
 def clear_dir(d):

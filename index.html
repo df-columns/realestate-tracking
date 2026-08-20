@@ -504,28 +504,27 @@ td.cur{font-weight:650}
    데이터 원본 (data source)
 
    REMOTE_DATA_URL — Firebase Hosting 에 올린 apt_data.json 의 절대 주소.
-   publish.py 가 배포할 때 이 한 줄을 자동으로 채워 넣는다.
+   publish.py 가 배포할 때 이 값을 그때의 주소로 다시 써 넣는다.
    그래서 배포 후 내려받은 index.html 은 파일 하나만 있어도,
    심지어 file:// 로 그냥 열어도 Firebase 에서 데이터를 받아 동작한다.
-
-   우선순위: 같은 폴더의 JSON → 같은 폴더의 JS(오프라인 폴백) → Firebase
-   (Hosting 에 올라간 페이지는 1번에서 바로 끝난다)
+   웹으로 열렸을 때는 마지막 폴백으로 남아 자기 폴더의 데이터가 없거나
+   일시적으로 안 받아질 때(예: Pages 재빌드 중 503) 받아 준다.
    ─────────────────────────────────────────────────────────────── */
-var REMOTE_DATA_URL = "";
+var REMOTE_DATA_URL = "https://realestatetracking-89d37.web.app/data/apt_data.json";
 
 var DATA_SOURCES = [];
 (function(){
-  var sameOrigin = false;
-  if(REMOTE_DATA_URL){
-    try { sameOrigin = new URL(REMOTE_DATA_URL, location.href).origin === location.origin; }
-    catch(e){ sameOrigin = false; }
-  }
-  // Hosting 에 올라간 페이지는 자기 폴더에 데이터가 같이 있으니 상대경로가 먼저.
-  // 파일 하나만 떼어 온 경우(file:// 등)는 Firebase 를 먼저 — 헛된 404 를 안 낸다.
-  if(REMOTE_DATA_URL && !sameOrigin)
+  // 파일 하나만 떼어 온 경우(file://)는 옆에 데이터가 없다. Firebase 를 먼저 봐서
+  // 헛된 404 를 안 낸다. 웹으로 서비스되는 페이지(Hosting·Pages·로컬 서버)는
+  // 자기 폴더의 데이터가 우선이고, 그게 안 되면 Firebase 로 넘어간다.
+  // Pages 재빌드 중에는 상대경로가 잠깐 503 을 내는데 이때 폴백이 받아 준다.
+  var fileMode = (location.protocol === "file:");
+  if(REMOTE_DATA_URL && fileMode)
     DATA_SOURCES.push({ kind: "json", url: REMOTE_DATA_URL });
   DATA_SOURCES.push({ kind: "json",   url: "data/apt_data.json" });
   DATA_SOURCES.push({ kind: "script", url: "data/apt_data.js" });
+  if(REMOTE_DATA_URL && !fileMode)
+    DATA_SOURCES.push({ kind: "json", url: REMOTE_DATA_URL });
 })();
 
 (function bootstrap(){
