@@ -1,0 +1,104 @@
+name: 실거래가 갱신 및 배포
+
+# 국토부 실거래가는 신고 기한(계약 후 30일) 때문에 최근 몇 달이 계속 늘어난다.
+# 매일 최근 3개월만 다시 받고(약 300회 요청) 캐시 전체로 10년치를 재집계한다.
+# 전체 재수집은 약 7,200회라 일일 한도(보통 10,000회)에 가까우므로 수동으로만 돈다.
+
+on:
+  schedule:
+    - cron: "0 20 * * *"        # 매일 05:00 KST (UTC 20:00)
+  workflow_dispatch:
+    inputs:
+      recent:
+        description: "다시 받을 최근 개월 수"
+        default: "3"
+      full:
+        description: "10년 전체 재수집 (요청 약 7,200회 — 일일 한도 주의)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rtms-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      # 구·월 단위 원본 캐시. 이게 살아 있으면 매일 300회로 끝나고,
+      # 없으면 그 회차만 전체 수집(약 7,200회)을 하고 다시 캐시를 채운다.
+      - name: 캐시 복원
+        uses: actions/cache/restore@v4
+        with:
+          path: cache
+          key: rtms-cache-${{ github.run_id }}
+          restore-keys: rtms-cache-
+
+      - name: 수집 · 재집계 · 검증
+        env:
+          MOLIT_SERVICE_KEY: ${{ secrets.MOLIT_SERVICE_KEY }}
+          RECENT: ${{ inputs.recent || '3' }}
+          FULL: ${{ inputs.full }}
+        run: |
+          if [ "$FULL" = "true" ]; then
+            python update.py --full --rate 6
+          else
+            python update.py --recent "$RECENT" --rate 6
+          fi
+
+      # 수집이 중간에 깨져도 받아 둔 만큼은 남긴다 (실패한 구·월은 애초에 캐시되지 않는다)
+      - name: 캐시 저장
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: cache
+          key: rtms-cache-${{ github.run_id }}
+
+      - name: 배포용 빌드
+        run: python publish.py --build-only
+
+      - name: 서비스 계정 키 쓰기
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+
+      - name: Firebase Hosting 배포
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+        run: npx --yes firebase-tools@latest deploy --only hosting
+
+      - name: 배포 결과 확인
+        run: |
+          HOST="$(python -c "import json; print(json.load(open('.firebaserc'))['projects']['default'])").web.app"
+          echo "https://$HOST/"
+          curl -fsS "https://$HOST/data/apt_data.json" -o live.json
+          python -c "
+          import json
+          j = json.load(open('live.json', encoding='utf-8'))
+          m = j['meta']
+          print('배포된 데이터: 단지 %d개 / %s~%s / 생성 %s'
+                % (len(j['complexes']), m['start'], m['end'], m['generated']))
+          "
+          rm -f live.json
+
+      - name: 매칭 리포트 남기기
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: match-report
+          path: data/match_report.md
+          if-no-files-found: ignore

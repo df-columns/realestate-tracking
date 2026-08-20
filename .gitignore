@@ -1,0 +1,8 @@
+apikey.txt
+cache/
+__pycache__/
+public/
+.firebase/
+.gstack/
+dist/
+collect.log
