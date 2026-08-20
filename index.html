@@ -295,6 +295,7 @@ td.cur{font-weight:650}
   <h1>서울·수도권 급지별 실거래가 추이</h1>
   <span class="sub" id="metaLine"></span>
   <span class="badge" id="dataBadge"></span>
+  <span class="badge warn" id="staleBadge" hidden></span>
 </header>
 
 <!-- 전역 필터: 아래 모든 탭이 이 조건으로 다시 그려진다 -->
@@ -1804,12 +1805,30 @@ function renderHeat(){
   document.getElementById("heatTitle").textContent =
     (S.groupBy === "tier" ? "급지별" : "권역별") + " 기간 변동 히트맵 — 전용 " +
     S.area + "㎡ · " + (isRatio ? "전세가율" : typeLabel());
+  document.getElementById("heatNote").textContent = "";      // 아래에서 채운다
+
+  // 위쪽 관찰기간으로 자른 구간. 연도별과 함께 "지금 보고 있는 기간" 수익률도 준다.
+  var rys = rangeYms();
+  var SEL = "__sel", ALL = "__all";
+  var selRange = ymLabel(rys[0]) + "~" + ymLabel(rys[rys.length-1]);
+  var wholeRange = ymLabel(yms[0]) + "~" + ymLabel(yms[yms.length-1]);
+  var sameAsWhole = (rys[0] === yms[0] && rys[rys.length-1] === yms[yms.length-1]);
+
   document.getElementById("heatNote").textContent =
     "행이 " + (S.groupBy === "tier" ? "급지" : "권역") + ", 열이 " +
     (S.gran === "q" ? "분기" : "연도") + "입니다. 각 칸은 그 기간의 중위가 변동(" + unit +
     ")이고 색이 진할수록 큰 변동입니다. 열마다 가장 많이 오른 칸에 테두리를 둘렀습니다. " +
-    "관찰기간과 무관하게 전 구간(" + ymLabel(yms[0]) + "~" + ymLabel(yms[yms.length-1]) +
-    ")을 보여줍니다. 색으로 급지를 구분하지 않으므로 10개 급지를 한 번에 볼 수 있습니다.";
+    "연도별 칸은 관찰기간과 무관하게 전 구간(" + wholeRange + ")을 보여주고, " +
+    (sameAsWhole
+      ? "지금은 관찰기간이 전 구간과 같습니다."
+      : "오른쪽 <선택기간> 열이 위에서 고른 관찰기간(" + selRange + ") 동안의 변동입니다.") +
+    " 색으로 급지를 구분하지 않으므로 10개 급지를 한 번에 볼 수 있습니다.";
+
+  function change(map, fromYm, toYm){
+    var a = valueNear(map, fromYm, 5), b = valueNear(map, toYm, 5);
+    if(a == null || b == null || !(a > 0)) return null;
+    return isRatio ? (b - a) : (b / a - 1) * 100;
+  }
 
   // 값 계산: 열 끝값 / 직전 열 끝값
   var cell = {};      // key: groupKey + "|" + colKey
@@ -1824,16 +1843,22 @@ function renderHeat(){
       cell[g.key + "|" + c.key] = v;
       if(end != null) prevEnd = end;
     });
+    cell[g.key + "|" + SEL] = change(g.map, rys[0], rys[rys.length-1]);
+    var fl = firstLast(g.map, yms);
+    cell[g.key + "|" + ALL] = (fl[0] && fl[1])
+      ? (isRatio ? (g.map[fl[1]].v - g.map[fl[0]].v)
+                 : (g.map[fl[1]].v / g.map[fl[0]].v - 1) * 100)
+      : null;
   });
-  // 열별 1위
+  // 열별 1위 — 요약 두 열에도 테두리를 둘러 어느 급지가 앞섰는지 바로 보이게
   var best = {};
-  cols.forEach(function(c){
+  cols.map(function(c){ return c.key; }).concat([SEL, ALL]).forEach(function(ck){
     var bk = null, bv = -Infinity;
     groups.forEach(function(g){
-      var v = cell[g.key + "|" + c.key];
+      var v = cell[g.key + "|" + ck];
       if(v != null && v > bv){ bv = v; bk = g.key; }
     });
-    if(bk != null) best[c.key] = bk;
+    if(bk != null) best[ck] = bk;
   });
 
   var host = document.getElementById("heatGrid");
@@ -1842,7 +1867,16 @@ function renderHeat(){
   var thead = el("thead"), tr = el("tr");
   tr.appendChild(el("th","rowh", S.groupBy === "tier" ? "급지" : "권역"));
   cols.forEach(function(c){ tr.appendChild(el("th", null, c.label)); });
-  tr.appendChild(el("th", null, "전 구간"));
+  if(!sameAsWhole){
+    var thSel = el("th","static");
+    thSel.appendChild(document.createTextNode("선택기간"));
+    thSel.appendChild(el("div","rowsub", selRange));
+    tr.appendChild(thSel);
+  }
+  var thAll = el("th","static");
+  thAll.appendChild(document.createTextNode("전 구간"));
+  thAll.appendChild(el("div","rowsub", wholeRange));
+  tr.appendChild(thAll);
   thead.appendChild(tr); t.appendChild(thead);
 
   var tb = el("tbody");
@@ -1867,13 +1901,18 @@ function renderHeat(){
                  (v == null ? "자료 부족" : (v > 0 ? "+" : "") + v.toFixed(1) + unit);
       row.appendChild(td);
     });
-    // 전 구간 누적
-    var f = fl[0] ? g.map[fl[0]].v : null, l = fl[1] ? g.map[fl[1]].v : null;
-    var tot = (f && l) ? (isRatio ? (l - f) : (l/f - 1) * 100) : null;
-    var tdT = el("td", tot == null ? "na" : "",
-                 tot == null ? "—" : (tot > 0 ? "+" : "") + tot.toFixed(1));
-    tdT.style.background = deltaTint(tot, isRatio);
-    row.appendChild(tdT);
+    // 요약 두 열 — 선택기간(위쪽 관찰기간) / 전 구간
+    function summaryCell(ck, label){
+      var v = cell[g.key + "|" + ck];
+      var td = el("td", (v == null ? "na" : "") + (best[ck] === g.key ? " best" : ""),
+                 v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(1));
+      td.style.background = deltaTint(v, isRatio);
+      td.title = g.name + " · " + label + " : " +
+                 (v == null ? "자료 부족" : (v > 0 ? "+" : "") + v.toFixed(1) + unit);
+      row.appendChild(td);
+    }
+    if(!sameAsWhole) summaryCell(SEL, "선택기간 " + selRange);
+    summaryCell(ALL, "전 구간 " + wholeRange);
     tb.appendChild(row);
   });
   t.appendChild(tb);
@@ -2221,6 +2260,31 @@ function renderCompareTable(series, yms){
 function ymdLabel(v){
   var s = String(v);
   return s.slice(0,4) + "." + s.slice(4,6) + "." + s.slice(6,8);
+}
+
+/* ══ 데이터가 얼마나 신선한지 ═══════════════════════════════════ */
+var STALE_DAYS = 3;                 // 매일 갱신이므로 3일이면 멈춘 것으로 본다
+
+function daysAgo(iso){
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if(!m) return null;
+  var then = new Date(+m[1], +m[2] - 1, +m[3]);
+  var now = new Date();
+  now = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((now - then) / 86400000);
+}
+function agoLabel(n){
+  if(n == null) return "생성일 미상";
+  if(n <= 0) return "오늘 갱신";
+  if(n === 1) return "어제 갱신";
+  return n + "일 전 갱신";
+}
+/* 실제로 데이터가 며칠까지 반영됐는지. 생성일과 다를 수 있다
+   (신고 기한 때문에 오늘 받아도 마지막 거래는 며칠 전일 수 있다). */
+function latestDealYmd(){
+  var m = 0;
+  for(var i = 0; i < RECENT.length; i++) if(RECENT[i][3] > m) m = RECENT[i][3];
+  return m || null;
 }
 /* 신규 거래는 관찰기간과 무관하게 '오늘'에서 거꾸로 자른다.
    달 단위가 아니라 날짜 단위여서 이번 달 거래가 바로 들어온다. */
@@ -2777,10 +2841,27 @@ function refresh(){ buildControls(); render(); }
 
 /* ══ 초기화 ══════════════════════════════════════════════════ */
 function init(){
-  document.getElementById("metaLine").textContent =
+  // 언제 받은 데이터인지 한눈에 보이게 — 생성일 자체보다 "며칠 전"이 빨리 읽힌다.
+  var bits = [
     META.start.slice(0,4) + "." + META.start.slice(4) + " ~ " +
-    META.end.slice(0,4) + "." + META.end.slice(4) +
-    " · 단지 " + C.length + "개 · 생성 " + META.generated;
+    META.end.slice(0,4) + "." + META.end.slice(4),
+    "단지 " + C.length + "개"
+  ];
+  var lastDeal = latestDealYmd();
+  if(lastDeal) bits.push("최신 거래 " + ymdLabel(lastDeal));
+  var ago = daysAgo(META.generated);
+  bits.push(agoLabel(ago) + (META.generated ? " (" + META.generated + ")" : ""));
+  document.getElementById("metaLine").textContent = bits.join(" · ");
+
+  // 갱신이 며칠 밀리면 눈에 띄게 알린다. 자동 수집이 멈춘 걸 모르고 보는 게 최악이다.
+  var stale = document.getElementById("staleBadge");
+  if(ago != null && ago >= STALE_DAYS){
+    stale.textContent = "데이터가 " + ago + "일 전입니다 — 수집이 멈춘 듯합니다";
+    stale.hidden = false;
+  } else {
+    stale.hidden = true;
+  }
+
   var badge = document.getElementById("dataBadge");
   if(META.sample){ badge.className = "badge warn"; badge.textContent = "샘플 데이터 (실거래 아님)"; }
   else badge.textContent = "국토교통부 실거래가";
