@@ -321,10 +321,9 @@ td.cur{font-weight:650}
 
 <div class="tabs" role="tablist">
   <button role="tab" data-tab="map" aria-selected="true">급지 지도</button>
-  <button role="tab" data-tab="table" aria-selected="false">상세 표</button>
   <button role="tab" data-tab="region" aria-selected="false">그룹 추이</button>
   <button role="tab" data-tab="compare" aria-selected="false">단지 비교</button>
-  <button role="tab" data-tab="raw" aria-selected="false">월별 원자료</button>
+  <button role="tab" data-tab="table" aria-selected="false">상세 표</button>
 </div>
 
 <!-- ══ 탭 0: 급지 지도 ═════════════════════════════════════════ -->
@@ -440,6 +439,8 @@ td.cur{font-weight:650}
         <h2 id="cmpTitle"></h2>
         <p class="note" id="cmpNote"></p>
         <div id="cmpCharts"></div>
+        <p class="note">차트에 쓰인 월별 값 그대로 내려받습니다.
+          <button class="iconbtn" id="csvBtn" type="button">CSV 내려받기</button></p>
       </div>
       <div class="card">
         <h2>선택 단지 요약</h2>
@@ -447,16 +448,6 @@ td.cur{font-weight:650}
         <div class="tblwrap"><table id="cmpTable"></table></div>
       </div>
     </div>
-  </div>
-</section>
-
-<!-- ══ 탭 4: 월별 원자료 ═══════════════════════════════════════ -->
-<section id="tab-raw" hidden>
-  <div class="card">
-    <h2>월별 값 (선택 단지)</h2>
-    <p class="note">차트에 쓰인 값 그대로. 괄호 안은 해당 월 거래 건수.
-      <button class="iconbtn" id="csvBtn" type="button">CSV 내려받기</button></p>
-    <div class="tblwrap" id="rawTable"></div>
   </div>
 </section>
 
@@ -2184,33 +2175,7 @@ function renderCompareTable(series, yms){
   if(!tb.children.length) wrap.appendChild(el("div","empty","선택한 조건에 해당하는 거래가 없습니다."));
 }
 
-/* ══ 월별 원자료 ═════════════════════════════════════════════ */
-function renderRaw(){
-  var yms = rangeYms(), series = selectedSeries(yms);
-  var host = document.getElementById("rawTable");
-  host.textContent = "";
-  if(!series.length){
-    host.appendChild(el("div","empty","‘단지 비교’ 탭이나 표의 단지명을 눌러 단지를 선택하세요."));
-    return;
-  }
-  var t = el("table"), thead = el("thead"), tr = el("tr");
-  tr.appendChild(el("th","l static","월"));
-  series.forEach(function(s){ tr.appendChild(el("th","static", s.name)); });
-  thead.appendChild(tr); t.appendChild(thead);
-  var tb = el("tbody");
-  for(var i=yms.length-1;i>=0;i--){
-    var ym = yms[i];
-    if(!series.some(function(s){ return s.map[ym]; })) continue;
-    var row = el("tr");
-    row.appendChild(el("td","l", ymLabel(ym)));
-    series.forEach(function(s){
-      var p = s.map[ym];
-      row.appendChild(el("td", null, p ? fmtVal(p.v) + (p.n ? " (" + p.n + ")" : "") : "—"));
-    });
-    tb.appendChild(row);
-  }
-  t.appendChild(tb); host.appendChild(t);
-}
+/* ══ CSV 내려받기 ═══════════════════════════════════════════ */
 function downloadCsv(){
   var yms = rangeYms(), series = selectedSeries(yms);
   if(!series.length){ alert("먼저 단지를 선택하세요."); return; }
@@ -2470,17 +2435,16 @@ function setTab(name){
   var tabs = document.querySelectorAll(".tabs button");
   for(var i=0;i<tabs.length;i++)
     tabs[i].setAttribute("aria-selected", String(tabs[i].dataset.tab === name));
-  ["map","table","region","compare","raw"].forEach(function(t){
+  ["map","region","compare","table"].forEach(function(t){
     document.getElementById("tab-" + t).hidden = (t !== name);
   });
   render();
 }
 function render(){
   if(S.tab === "map") renderMap();
-  else if(S.tab === "table") renderTables();
   else if(S.tab === "region") renderRegion();
   else if(S.tab === "compare") renderCompare();
-  else renderRaw();
+  else renderTables();
 }
 function refresh(){ buildControls(); render(); }
 
