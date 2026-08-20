@@ -163,10 +163,31 @@ curl -o index.html https://realestatetracking-89d37.web.app/
 동작하지 않는다. 같은 폴더에 `data/` 가 있어야 한다. 배포 시 `publish.py` 가 주소를
 채워 넣은 사본을 만든다.
 
-## 자동 갱신 (GitHub Actions)
+## 자동 갱신
 
-`.github/workflows/update.yml` 이 **매일 05:00 KST** 에 돌면서 수집 → 재집계 → 검증 →
-Firebase 배포까지 끝낸다. PC 가 꺼져 있어도 돌아간다.
+역할이 둘로 나뉜다. **수집은 이 PC, 배포는 GitHub Actions.**
+
+```
+ 이 PC (작업 스케줄러)                    GitHub                      결과
+ daily.bat
+   └ update.py --recent 3 --push
+       수집 → 재집계 → 검증 ──┐
+                              └ git push ─┬─ Pages 자동 재빌드 ──→ github.io
+                                          └─ deploy.yml ────────→ web.app
+```
+
+### 왜 수집을 클라우드에서 못 하나
+
+국토부 API(`apis.data.go.kr`)가 **GitHub 러너에서 접속이 안 된다.** 2026-08-20 실측:
+
+```
+!! 실패 trade 11110 201707 p1: HTTPSConnectionPool(host='apis.data.go.kr', port=443):
+   Max retries exceeded ...
+```
+
+80건 전부 같은 오류, 성공 0건, 60분 타임아웃으로 취소. 해외 클라우드 IP 차단으로 보인다.
+같은 코드를 이 PC 에서 돌리면 **66요청 실패 0건 · 8.0 req/s · 감속 0회** 로 끝난다.
+그래서 수집은 국내에서만 한다.
 
 ### 왜 매일 돌려도 부담이 없나
 
@@ -176,42 +197,48 @@ Firebase 배포까지 끝낸다. PC 가 꺼져 있어도 돌아간다.
 | 최근 3개월만 재수집 | 약 300회 |
 | 캐시로 10년치 재집계 | 0회 |
 
-신고 기한(계약 후 30일) 때문에 **변하는 건 최근 몇 달뿐이다.** 그래서 최근 3개월만
-다시 받고 나머지는 캐시를 쓴다. 일일 한도(보통 10,000회) 대비 3% 수준이다.
-캐시가 유실된 회차만 전체 수집을 하는데, 그 한 번도 한도 안에 들어간다.
+신고 기한(계약 후 30일) 때문에 **변하는 건 최근 몇 달뿐이다.** 일일 한도(보통 10,000회)
+대비 3% 수준이다.
 
-### 필요한 설정
+### 작업 스케줄러 등록
 
-리포지토리 **Settings → Secrets and variables → Actions** 에 두 개를 넣는다.
+```
+schtasks /create /tn "실거래가 갱신" /sc daily /st 06:30 /f /tr "\"C:\Users\sw.shin\Desktop\claude code 프로젝트\027_실거래가 추이\daily.bat\""
+```
+
+경로에 공백이 있어 `/tr` 값 안쪽을 `\"` 로 한 번 더 감싼다. cmd.exe 에서 실행한다.
+
+놓친 실행을 따라잡게 하려면 작업 스케줄러 UI 에서 해당 작업 → 설정 →
+**예약 시작 시간을 놓친 경우 가능한 즉시 작업 시작** 을 켠다.
+실행 기록은 `daily.log` 에 쌓인다.
+
+### 배포 워크플로
+
+`.github/workflows/deploy.yml` 은 `index.html` · `data/apt_data.json` · `firebase.json` ·
+`publish.py` · `.firebaserc` 가 푸시될 때만 돈다. 빌드 후 Firebase 에 올리고, 올라간
+데이터를 다시 받아 단지 수·기간·신규 거래 건수를 찍는다. 10분 타임아웃.
+
+필요한 시크릿은 하나다.
 
 | 이름 | 값 |
 |---|---|
-| `MOLIT_SERVICE_KEY` | `apikey.txt` 의 내용 (공공데이터포털 일반 인증키 Decoding) |
-| `FIREBASE_SERVICE_ACCOUNT` | 서비스 계정 JSON 키 전체 |
+| `FIREBASE_SERVICE_ACCOUNT` | 서비스 계정 JSON 키 전체 (역할: Firebase Hosting 관리자) |
 
-서비스 계정은 [Google Cloud Console → IAM → 서비스 계정](https://console.cloud.google.com/iam-admin/serviceaccounts)
-에서 만든다. 역할은 **Firebase Hosting 관리자**. 만든 뒤 **키 → 키 추가 → JSON** 으로
-받은 파일 내용을 그대로 시크릿에 붙여 넣는다. (권한이 부족하다고 하면 **Firebase 뷰어** 를 추가한다.)
+수집이 로컬로 옮겨졌으므로 `MOLIT_SERVICE_KEY` 시크릿은 더 필요 없다.
 
-### 수동 실행
-
-Actions 탭 → **실거래가 갱신 및 배포** → Run workflow. 두 가지를 고를 수 있다.
-
-- `recent` — 다시 받을 최근 개월 수 (기본 3)
-- `full` — 10년 전체 재수집. 단지 목록(`complexes.py`)을 크게 고쳤을 때만 쓴다.
-
-### 로컬에서 같은 일을 하려면
+### 로컬에서 직접
 
 ```bash
 py -3 update.py                  # 최근 3개월 갱신 + 재집계 + 검증
 py -3 update.py --recent 6
-py -3 update.py --full           # 전체 재수집
+py -3 update.py --full           # 전체 재수집 (약 7,200회)
 py -3 update.py --aggregate-only # 수집 없이 재집계만
-py -3 update.py --build          # 검증 후 public/ 까지
+py -3 update.py --push           # 검증 후 커밋·푸시 (Pages + Firebase 까지)
 ```
 
-`update.py` 는 배포 전에 결과를 검증한다. 단지 90개 미만, 기간 9년 미만, 최근 3개월
-거래 0건이면 **배포하지 않고** `data/apt_data.json` 을 갱신 전 상태로 되돌린다.
+`update.py` 는 배포 전에 결과를 검증한다. 단지 90개 미만, 기간 9년 미만, 거래
+15,000행 미만, 가장 이른 거래가 시작월보다 12개월 이상 늦음, 최근 3개월 거래 0건 —
+하나라도 걸리면 **푸시하지 않고** `data/apt_data.json` 을 갱신 전으로 되돌린다.
 최근 몇 달만 받는 중간 단계에서 데이터가 잠깐 짧아지는데, 그 상태가 배포되는 걸
 막기 위한 장치다.
 

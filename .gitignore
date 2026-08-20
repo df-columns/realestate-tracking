@@ -7,3 +7,4 @@ public/
 dist/
 collect.log
 data/apt_data.js
+daily.log

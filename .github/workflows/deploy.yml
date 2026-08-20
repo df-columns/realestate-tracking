@@ -1,0 +1,66 @@
+name: Firebase Hosting 배포
+
+# 왜 수집을 여기서 안 하나
+#   국토부 API(apis.data.go.kr)가 GitHub 러너에서 접속이 막힌다. 2026-08-20 실측:
+#   80건 전부 "Max retries exceeded", 성공 0건, 60분 타임아웃. 해외 클라우드 IP 차단으로
+#   보인다. 그래서 수집은 국내 PC 에서 update.py 로 하고(작업 스케줄러), 이 워크플로는
+#   푸시된 데이터를 Firebase 로 옮기는 일만 한다.
+#   GitHub Pages 는 푸시만으로 자동 갱신되므로 여기서 다루지 않는다.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - index.html
+      - data/apt_data.json
+      - firebase.json
+      - publish.py
+      - .firebaserc
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: 배포용 빌드
+        run: python publish.py --build-only
+
+      - name: 서비스 계정 키 쓰기
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+
+      - name: Firebase Hosting 배포
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+        run: npx --yes firebase-tools@latest deploy --only hosting
+
+      - name: 배포 결과 확인
+        run: |
+          HOST="$(python -c "import json; print(json.load(open('.firebaserc'))['projects']['default'])").web.app"
+          echo "https://$HOST/"
+          curl -fsS "https://$HOST/data/apt_data.json" -o live.json
+          python -c "
+          import json
+          j = json.load(open('live.json', encoding='utf-8'))
+          m = j['meta']
+          print('배포된 데이터: 단지 %d개 / %s~%s / 생성 %s / 신규 거래 %d건'
+                % (len(j['complexes']), m['start'], m['end'], m['generated'],
+                   len((j.get('recent') or {}).get('rows') or [])))
+          "
+          rm -f live.json

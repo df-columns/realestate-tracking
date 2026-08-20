@@ -19,8 +19,13 @@
   py -3 update.py                  # 최근 3개월 갱신 + 재집계 + 검증
   py -3 update.py --recent 6       # 최근 6개월
   py -3 update.py --full           # 10년 전체 재수집 (약 7,200회, 일일 한도 주의)
-  py -3 update.py --build          # 검증 후 public/ 까지 빌드
   py -3 update.py --aggregate-only # 수집 없이 재집계만
+  py -3 update.py --build          # 검증 후 public/ 까지 빌드
+  py -3 update.py --push           # 검증 후 커밋·푸시 (Pages 갱신 + Firebase 배포)
+
+정기 갱신은 이 PC 의 작업 스케줄러가 daily.bat 을 돌린다. 국토부 API 가 GitHub
+러너에서는 접속이 막혀(해외 클라우드 IP 차단) 수집을 클라우드에서 할 수 없다.
+푸시하면 GitHub Pages 는 자동 갱신되고, deploy.yml 이 Firebase 에 올린다.
 """
 
 import argparse
@@ -121,12 +126,36 @@ def verify():
     return j
 
 
+def git(args, check=True):
+    rc = subprocess.call(["git"] + args, cwd=ROOT)
+    if check and rc != 0:
+        raise RuntimeError("git %s 실패 (exit %d)" % (args[0], rc))
+    return rc
+
+
+def push():
+    """갱신된 데이터를 리포에 되밀어 GitHub Pages 와 배포 워크플로를 움직인다."""
+    print("\n=== 커밋 · 푸시 ===")
+    if subprocess.call(["git", "diff", "--quiet", "--", "data/apt_data.json"],
+                       cwd=ROOT) == 0:
+        print("데이터 변화 없음 — 커밋 생략")
+        return
+    with open(DATA_JSON, encoding="utf-8") as f:
+        m = json.load(f)["meta"]
+    git(["add", "data/apt_data.json"])
+    git(["commit", "-m", "데이터 갱신 %s~%s" % (m["start"], m["end"])])
+    git(["push", "origin", "HEAD"])
+    print("푸시 완료 — Pages 는 곧 갱신되고, 배포 워크플로가 Firebase 에 올립니다.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--recent", type=int, default=3, help="다시 받을 최근 개월 수 (기본 3)")
     ap.add_argument("--full", action="store_true", help="10년 전체 재수집 (요청 약 7,200회)")
     ap.add_argument("--aggregate-only", action="store_true", help="수집 없이 재집계만")
     ap.add_argument("--build", action="store_true", help="검증 후 public/ 빌드")
+    ap.add_argument("--push", action="store_true",
+                    help="검증 후 data/apt_data.json 을 커밋·푸시 (Pages 갱신 + 배포 워크플로 트리거)")
     ap.add_argument("--rate", type=float, default=None, help="collect.py 의 초당 요청 상한")
     args = ap.parse_args()
 
@@ -166,6 +195,9 @@ def main():
 
     if args.build:
         run(["publish.py", "--build-only"], "배포용 빌드")
+
+    if args.push:
+        push()
 
     print("\n갱신 완료.")
 
