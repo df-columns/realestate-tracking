@@ -43,12 +43,17 @@ echo   [1/4] 파이썬 확인 완료
 echo.
 
 rem ---- 2. 토큰 ------------------------------------------------------
-if not exist token.txt goto needtoken
-findstr /b /c:"github_pat_" token.txt >nul 2>&1
+rem findstr 은 BOM 이 붙은 파일에서 아무것도 못 찾는다(/b 여부와 무관).
+rem 메모장이 BOM 을 붙이므로 인코딩을 제대로 다루는 파이썬에 맡긴다.
+set TRIES=0
+
+:tokencheck
+%PY% push_github.py --check-token >nul 2>&1
 if not errorlevel 1 goto tokenok
-findstr /b /c:"ghp_" token.txt >nul 2>&1
-if not errorlevel 1 goto tokenok
-goto needtoken
+set /a TRIES+=1
+if %TRIES% GEQ 4 goto tokengiveup
+goto asktoken
+
 :tokenok
 echo   [2/4] GitHub 토큰 확인 완료
 echo.
@@ -124,20 +129,46 @@ start https://www.python.org/downloads/
 pause
 exit /b 1
 
-:needtoken
-echo   [!] GitHub 토큰이 아직 없습니다. 한 번만 만들면 됩니다.
+:asktoken
+echo   ---------------------------------------------
+echo    GitHub 토큰이 필요합니다. 한 번만 만들면 됩니다.
+echo   ---------------------------------------------
 echo.
-echo       1. 방금 열린 페이지에서
-echo            Token name        : collector
-echo            Repository access : Only select repositories
-echo                                -^> realestate-tracking 선택
-echo            Permissions       : Repository permissions 의 Contents 를
-echo                                Read and write 로
-echo       2. Generate token 을 누르고 나온 문자열을 복사
-echo       3. 이 폴더의 token.txt 를 메모장으로 열어 내용을 전부 지우고 붙여넣기
-echo       4. 저장하고 이 '설치.bat' 을 다시 더블클릭
+if %TRIES% GTR 1 goto skipopen
+echo    방금 열린 페이지에서 이렇게 고르세요.
+echo.
+echo      Token name        : collector
+echo      Repository access : Only select repositories
+echo                          -^> realestate-tracking 선택
+echo      Permissions       : Repository permissions 의 Contents 를
+echo                          Read and write 로
+echo.
+echo    그리고 맨 아래 Generate token 을 누르세요.
 echo.
 start https://github.com/settings/personal-access-tokens/new
+:skipopen
+echo    나온 토큰 문자열을 복사해서 아래에 붙여넣고 Enter 를 누르세요.
+echo    ^(붙여넣기는 이 창 안에서 마우스 오른쪽 클릭^)
+echo.
+set "TOKEN="
+set /p TOKEN=   토큰 : 
+rem 빈 입력일 때 asktoken 으로 되돌아가면 TRIES 를 건너뛰어 무한 반복이 된다.
+rem 반드시 카운터가 있는 tokencheck 로 돌아가야 한다.
+if not defined TOKEN goto tokencheck
+>token.txt echo %TOKEN%
+set "TOKEN="
+echo.
+echo    저장했습니다. 확인합니다...
+echo.
+goto tokencheck
+
+:tokengiveup
+echo   [!] 토큰을 확인할 수 없습니다.
+echo.
+echo       토큰은 github_pat_ 또는 ghp_ 로 시작하는 긴 문자열입니다.
+echo       token.txt 를 메모장으로 직접 열어 붙여넣고 저장한 뒤
+echo       이 '설치.bat' 을 다시 더블클릭해도 됩니다.
+echo.
 notepad token.txt
 pause
 exit /b 1
@@ -314,7 +345,7 @@ def main():
     wr("update.bat", DAILY_BAT, "cp949")            # 스케줄러가 부른다 (ASCII 이름)
     wr("지금갱신.bat", RUNNOW_BAT, "cp949")
     wr("자동실행끄기.bat", STOP_BAT, "cp949")
-    wr("token.txt", TOKEN_TXT)
+    wr("token.txt", TOKEN_TXT, "utf-8")
     wr("읽어보세요.txt", README_TXT)
 
     total = 0

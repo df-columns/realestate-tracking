@@ -106,7 +106,21 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--token", help="GitHub 토큰 (기본: GITHUB_TOKEN 또는 token.txt)")
     ap.add_argument("--message", help="커밋 메시지 (기본: 데이터 기간으로 자동)")
+    ap.add_argument("--check-token", action="store_true",
+                    help="토큰이 있는지만 확인하고 끝낸다 (있으면 0, 없으면 1)")
     args = ap.parse_args()
+
+    if args.check_token:
+        # 설치 스크립트가 쓴다. findstr 은 BOM 이 붙은 파일에서 아무것도 못 찾으므로
+        # 인코딩을 제대로 다루는 이쪽에서 판단한다.
+        p = os.path.join(ROOT, "token.txt")
+        if os.environ.get("GITHUB_TOKEN"):
+            sys.exit(0)
+        if os.path.exists(p):
+            with io.open(p, encoding="utf-8-sig", errors="replace") as f:
+                if pick_token(f.read()):
+                    sys.exit(0)
+        sys.exit(1)
 
     if not os.path.exists(DATA_JSON):
         die("data/apt_data.json 이 없습니다. update.py 를 먼저 실행하세요.")
