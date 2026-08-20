@@ -1818,10 +1818,10 @@ function renderHeat(){
     "행이 " + (S.groupBy === "tier" ? "급지" : "권역") + ", 열이 " +
     (S.gran === "q" ? "분기" : "연도") + "입니다. 각 칸은 그 기간의 중위가 변동(" + unit +
     ")이고 색이 진할수록 큰 변동입니다. 열마다 가장 많이 오른 칸에 테두리를 둘렀습니다. " +
-    "연도별 칸은 관찰기간과 무관하게 전 구간(" + wholeRange + ")을 보여주고, " +
-    (sameAsWhole
-      ? "지금은 관찰기간이 전 구간과 같습니다."
-      : "오른쪽 <선택기간> 열이 위에서 고른 관찰기간(" + selRange + ") 동안의 변동입니다.") +
+    "연도별 칸은 관찰기간과 무관하게 전 구간(" + wholeRange + ")을 보여줍니다. " +
+    "오른쪽 [선택기간] 열이 위에서 고른 관찰기간(" + selRange + ") 동안의 변동이고, " +
+    "[전 구간] 열은 데이터 전체(" + wholeRange + ")입니다." +
+    (sameAsWhole ? " 지금은 둘이 같은 구간이라 값도 같습니다." : "") +
     " 색으로 급지를 구분하지 않으므로 10개 급지를 한 번에 볼 수 있습니다.";
 
   function change(map, fromYm, toYm){
@@ -1867,12 +1867,11 @@ function renderHeat(){
   var thead = el("thead"), tr = el("tr");
   tr.appendChild(el("th","rowh", S.groupBy === "tier" ? "급지" : "권역"));
   cols.forEach(function(c){ tr.appendChild(el("th", null, c.label)); });
-  if(!sameAsWhole){
-    var thSel = el("th","static");
-    thSel.appendChild(document.createTextNode("선택기간"));
-    thSel.appendChild(el("div","rowsub", selRange));
-    tr.appendChild(thSel);
-  }
+  // 관찰기간이 전 구간과 같아도 열을 남긴다. 숨기면 찾는 기능이 사라진 것처럼 보인다.
+  var thSel = el("th","static");
+  thSel.appendChild(document.createTextNode("선택기간"));
+  thSel.appendChild(el("div","rowsub", selRange));
+  tr.appendChild(thSel);
   var thAll = el("th","static");
   thAll.appendChild(document.createTextNode("전 구간"));
   thAll.appendChild(el("div","rowsub", wholeRange));
@@ -1911,7 +1910,7 @@ function renderHeat(){
                  (v == null ? "자료 부족" : (v > 0 ? "+" : "") + v.toFixed(1) + unit);
       row.appendChild(td);
     }
-    if(!sameAsWhole) summaryCell(SEL, "선택기간 " + selRange);
+    summaryCell(SEL, "선택기간 " + selRange);
     summaryCell(ALL, "전 구간 " + wholeRange);
     tb.appendChild(row);
   });
