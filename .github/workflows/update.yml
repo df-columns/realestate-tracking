@@ -18,7 +18,7 @@ on:
         default: false
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: rtms-update
@@ -72,6 +72,25 @@ jobs:
         with:
           path: cache
           key: rtms-cache-${{ github.run_id }}
+
+      # GitHub Pages 는 리포에 커밋된 data/apt_data.json 을 그대로 읽는다.
+      # 갱신분을 되밀어야 Pages 쪽도 최신이 된다. (이 워크플로는 push 로 돌지 않으므로 순환 없음)
+      - name: 갱신 데이터 커밋
+        run: |
+          if git diff --quiet -- data/apt_data.json; then
+            echo "데이터 변화 없음 — 커밋 생략"
+            exit 0
+          fi
+          SPAN=$(python -c "
+          import json
+          m = json.load(open('data/apt_data.json', encoding='utf-8'))['meta']
+          print('%s~%s' % (m['start'], m['end']))
+          ")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/apt_data.json
+          git commit -m "데이터 갱신 $SPAN"
+          git push
 
       - name: 배포용 빌드
         run: python publish.py --build-only

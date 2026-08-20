@@ -138,6 +138,31 @@ RTDB `".read": true`). 국토부 공개 실거래가라 문제는 없지만 쓰�
 > 공개 범위: Hosting 은 URL 을 아는 사람 누구나 접근한다. 국토부 공개 실거래가라
 > 문제는 없지만, 비공개가 필요하면 Firebase Auth + Firestore 로 옮겨야 한다.
 
+## 보는 방법 세 가지
+
+같은 화면을 세 경로로 볼 수 있다. 데이터는 한 파이프라인에서 나온다.
+
+| 경로 | 주소 | 데이터 출처 |
+|---|---|---|
+| Firebase Hosting | `https://realestatetracking-89d37.web.app/` | 같은 사이트의 `data/apt_data.json` |
+| GitHub Pages | `https://df-columns.github.io/realestate-tracking/` | 리포에 커밋된 `data/apt_data.json` |
+| 파일 하나 | 위 주소에서 저장한 `index.html` | Firebase (파일에 주소가 박혀 있다) |
+
+세 번째가 이 프로젝트의 원래 목표다. 배포된 사이트에서 받은 `index.html` 은
+**데이터 폴더 없이 파일 하나만으로**, `file://` 로 그냥 열어도 동작한다.
+실제 Chrome 에서 검증했다 (단지 99개·급지 지도·체크박스 198개 렌더 확인).
+
+```bash
+curl -o index.html https://realestatetracking-89d37.web.app/
+```
+
+껍데기만 파일이고 데이터는 매번 Firebase 에서 받으므로, 파일을 다시 보내지 않아도
+받는 사람은 늘 최신 데이터를 본다. 화면 기능을 고쳤을 때만 파일을 다시 주면 된다.
+
+주의: 리포 안의 `index.html`(소스)은 `REMOTE_DATA_URL` 이 비어 있어 파일 하나로는
+동작하지 않는다. 같은 폴더에 `data/` 가 있어야 한다. 배포 시 `publish.py` 가 주소를
+채워 넣은 사본을 만든다.
+
 ## 자동 갱신 (GitHub Actions)
 
 `.github/workflows/update.yml` 이 **매일 05:00 KST** 에 돌면서 수집 → 재집계 → 검증 →
