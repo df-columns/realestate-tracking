@@ -138,6 +138,58 @@ RTDB `".read": true`). 국토부 공개 실거래가라 문제는 없지만 쓰�
 > 공개 범위: Hosting 은 URL 을 아는 사람 누구나 접근한다. 국토부 공개 실거래가라
 > 문제는 없지만, 비공개가 필요하면 Firebase Auth + Firestore 로 옮겨야 한다.
 
+## 자동 갱신 (GitHub Actions)
+
+`.github/workflows/update.yml` 이 **매일 05:00 KST** 에 돌면서 수집 → 재집계 → 검증 →
+Firebase 배포까지 끝낸다. PC 가 꺼져 있어도 돌아간다.
+
+### 왜 매일 돌려도 부담이 없나
+
+| 작업 | API 요청 수 |
+|---|---|
+| 전체 수집 (10년 × 33개 시군구 × 2종) | 약 7,200회 |
+| 최근 3개월만 재수집 | 약 300회 |
+| 캐시로 10년치 재집계 | 0회 |
+
+신고 기한(계약 후 30일) 때문에 **변하는 건 최근 몇 달뿐이다.** 그래서 최근 3개월만
+다시 받고 나머지는 캐시를 쓴다. 일일 한도(보통 10,000회) 대비 3% 수준이다.
+캐시가 유실된 회차만 전체 수집을 하는데, 그 한 번도 한도 안에 들어간다.
+
+### 필요한 설정
+
+리포지토리 **Settings → Secrets and variables → Actions** 에 두 개를 넣는다.
+
+| 이름 | 값 |
+|---|---|
+| `MOLIT_SERVICE_KEY` | `apikey.txt` 의 내용 (공공데이터포털 일반 인증키 Decoding) |
+| `FIREBASE_SERVICE_ACCOUNT` | 서비스 계정 JSON 키 전체 |
+
+서비스 계정은 [Google Cloud Console → IAM → 서비스 계정](https://console.cloud.google.com/iam-admin/serviceaccounts)
+에서 만든다. 역할은 **Firebase Hosting 관리자**. 만든 뒤 **키 → 키 추가 → JSON** 으로
+받은 파일 내용을 그대로 시크릿에 붙여 넣는다. (권한이 부족하다고 하면 **Firebase 뷰어** 를 추가한다.)
+
+### 수동 실행
+
+Actions 탭 → **실거래가 갱신 및 배포** → Run workflow. 두 가지를 고를 수 있다.
+
+- `recent` — 다시 받을 최근 개월 수 (기본 3)
+- `full` — 10년 전체 재수집. 단지 목록(`complexes.py`)을 크게 고쳤을 때만 쓴다.
+
+### 로컬에서 같은 일을 하려면
+
+```bash
+py -3 update.py                  # 최근 3개월 갱신 + 재집계 + 검증
+py -3 update.py --recent 6
+py -3 update.py --full           # 전체 재수집
+py -3 update.py --aggregate-only # 수집 없이 재집계만
+py -3 update.py --build          # 검증 후 public/ 까지
+```
+
+`update.py` 는 배포 전에 결과를 검증한다. 단지 90개 미만, 기간 9년 미만, 최근 3개월
+거래 0건이면 **배포하지 않고** `data/apt_data.json` 을 갱신 전 상태로 되돌린다.
+최근 몇 달만 받는 중간 단계에서 데이터가 잠깐 짧아지는데, 그 상태가 배포되는 걸
+막기 위한 장치다.
+
 ### 데이터 갱신 주기
 
 국토부 실거래가는 계약일 기준으로 등록되며, 신고 기한(계약 후 30일) 때문에
