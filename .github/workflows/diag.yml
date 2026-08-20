@@ -1,0 +1,57 @@
+name: 진단 — 국토부 API 접속
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 러너 위치
+        run: curl -sS --max-time 15 https://ipinfo.io/json || echo "(ipinfo 실패)"
+
+      - name: DNS
+        run: |
+          echo "--- apis.data.go.kr ---"; getent hosts apis.data.go.kr || echo "(해석 실패)"
+          echo "--- www.data.go.kr ---";  getent hosts www.data.go.kr  || echo "(해석 실패)"
+
+      - name: TCP 443 / 80
+        run: |
+          for hp in "apis.data.go.kr 443" "apis.data.go.kr 80" "www.data.go.kr 443"; do
+            set -- $hp
+            echo -n "$1:$2 -> "
+            timeout 15 bash -c "cat < /dev/null > /dev/tcp/$1/$2" 2>/dev/null && echo "연결됨" || echo "실패"
+          done
+
+      - name: HTTPS 응답
+        run: |
+          for u in https://apis.data.go.kr/ https://www.data.go.kr/ https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev; do
+            echo -n "$u -> "
+            curl -sS -o /dev/null --max-time 25 -w '%{http_code} / %{time_total}s / ip=%{remote_ip}\n' "$u" 2>&1 | tail -1
+          done
+
+      - name: 브라우저 UA 로 재시도
+        run: |
+          curl -sS -o /dev/null --max-time 25 \
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+            -w 'UA 지정 -> %{http_code} / %{time_total}s\n' \
+            https://apis.data.go.kr/ 2>&1 | tail -1
+
+      - name: 실제 API 호출 1건
+        env:
+          KEY: ${{ secrets.MOLIT_SERVICE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "(MOLIT_SERVICE_KEY 시크릿 없음 — 생략)"; exit 0; fi
+          curl -sS --max-time 30 -G \
+            --data-urlencode "serviceKey=$KEY" \
+            --data-urlencode "LAWD_CD=11680" \
+            --data-urlencode "DEAL_YMD=202607" \
+            --data-urlencode "numOfRows=3" \
+            https://apis.data.go.kr/1613000/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev \
+            -o resp.xml -w 'http=%{http_code} time=%{time_total}s bytes=%{size_download}\n' || echo "curl 실패 exit=$?"
+          echo "--- 응답 앞부분 (키는 안 찍힘) ---"
+          head -c 500 resp.xml 2>/dev/null || echo "(응답 없음)"
