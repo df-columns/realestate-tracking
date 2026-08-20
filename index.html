@@ -70,10 +70,16 @@ select{
   padding:5px 8px;border-radius:7px;border:1px solid var(--border);
   background:var(--page);color:var(--ink);font:inherit;font-size:12.5px
 }
-input[type=month],input[type=text],input[type=search]{
+input[type=text],input[type=search]{
   padding:5px 8px;border-radius:7px;border:1px solid var(--border);
   background:var(--page);color:var(--ink);font:inherit;font-size:12.5px
 }
+/* 기간 직접 지정 — input[type=month] 는 연·월 칸을 따로 눌러야 해서 번거롭다.
+   연/월 드롭다운 두 개를 한 덩어리로 붙여 한 번의 클릭으로 고르게 한다. */
+.ymsel{display:inline-flex}
+.ymsel select{border-radius:0}
+.ymsel select:first-child{border-radius:7px 0 0 7px;border-right:0}
+.ymsel select:last-child{border-radius:0 7px 7px 0}
 .iconbtn{
   border:1px solid var(--border);background:var(--surface);border-radius:8px;
   padding:5px 10px;cursor:pointer;font-size:12.5px;color:var(--ink2);font-family:inherit
@@ -307,7 +313,9 @@ td.cur{font-weight:650}
     <div class="chips" id="chipSpans"></div>
   </div>
   <div class="fgroup"><span class="flabel">직접</span>
-    <input type="month" id="startYm"> <span class="flabel">~</span> <input type="month" id="endYm">
+    <span class="ymsel"><select id="startY"></select><select id="startM"></select></span>
+    <span class="flabel">~</span>
+    <span class="ymsel"><select id="endY"></select><select id="endM"></select></span>
     <button class="iconbtn" id="resetYm" type="button">초기화</button>
   </div>
   <div class="fgroup"><span class="flabel">전용면적</span>
@@ -630,7 +638,6 @@ function el(tag, cls, txt){
 function ymToIdx(ym){ return Math.floor(ym/100)*12 + (ym%100) - 1; }
 function idxToYm(i){ return Math.floor(i/12)*100 + (i%12) + 1; }
 function ymLabel(ym){ return Math.floor(ym/100) + "." + String(ym%100).padStart(2,"0"); }
-function ymInput(ym){ return Math.floor(ym/100) + "-" + String(ym%100).padStart(2,"0"); }
 function addMonths(ym, n){ return idxToYm(ymToIdx(ym) + n); }
 function pyeong(a){ return a / 3.305785; }
 function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
@@ -2805,17 +2812,49 @@ function buildBaseSelect(){
     render();
   };
 }
+/* 기간 직접 지정 — 연/월 드롭다운.
+   해당 연도에 데이터가 있는 달만 보여주므로 범위를 벗어난 값을 고를 수 없다. */
+function fillSel(sel, items, val){
+  sel.textContent = "";
+  items.forEach(function(it){
+    var o = el("option", null, it.label);
+    o.value = String(it.v);
+    sel.appendChild(o);
+  });
+  sel.value = String(val);
+  if(sel.selectedIndex < 0) sel.selectedIndex = 0;
+}
+function yearOpts(){
+  var out = [];
+  for(var y = Math.floor(dataStart()/100); y <= Math.floor(dataEnd()/100); y++)
+    out.push({v: y, label: y + "년"});
+  return out;
+}
+function monthOpts(year){
+  var lo = dataStart(), hi = dataEnd(), out = [];
+  for(var m = 1; m <= 12; m++){
+    var ym = year * 100 + m;
+    if(ym >= lo && ym <= hi) out.push({v: m, label: m + "월"});
+  }
+  return out;
+}
+function clampYm(ym){
+  return Math.min(dataEnd(), Math.max(dataStart(), ym));
+}
 function syncYmInputs(){
   var yms = rangeYms();
-  var a = document.getElementById("startYm"), b = document.getElementById("endYm");
-  a.min = b.min = ymInput(dataStart());
-  a.max = b.max = ymInput(dataEnd());
-  a.value = ymInput(yms[0]);
-  b.value = ymInput(yms[yms.length-1]);
+  var s = yms[0], e = yms[yms.length-1], ys = yearOpts();
+  fillSel(document.getElementById("startY"), ys, Math.floor(s/100));
+  fillSel(document.getElementById("startM"), monthOpts(Math.floor(s/100)), s % 100);
+  fillSel(document.getElementById("endY"), ys, Math.floor(e/100));
+  fillSel(document.getElementById("endM"), monthOpts(Math.floor(e/100)), e % 100);
 }
-function parseYmInput(v){
-  var m = /^(\d{4})-(\d{2})$/.exec(v || "");
-  return m ? parseInt(m[1],10)*100 + parseInt(m[2],10) : null;
+function readYmSels(){
+  function n(id){ return parseInt(document.getElementById(id).value, 10); }
+  var a = n("startY") * 100 + n("startM"), b = n("endY") * 100 + n("endM");
+  if(!isFinite(a) || !isFinite(b)) return null;
+  a = clampYm(a); b = clampYm(b);
+  return (a > b) ? [b, a] : [a, b];
 }
 
 /* ══ 탭 ══════════════════════════════════════════════════════ */
@@ -2870,15 +2909,14 @@ function init(){
   applyRangeKey("m36");
   buildControls(); syncYmInputs(); renderPicker(); setTab("map");
 
-  ["startYm","endYm"].forEach(function(id){
+  ["startY","startM","endY","endM"].forEach(function(id){
     document.getElementById(id).addEventListener("change", function(){
-      S.startYm = parseYmInput(document.getElementById("startYm").value);
-      S.endYm = parseYmInput(document.getElementById("endYm").value);
-      if(S.startYm && S.endYm && S.startYm > S.endYm){
-        var t = S.startYm; S.startYm = S.endYm; S.endYm = t;
-      }
-      S.rangeKey = null;                 // 직접 입력하면 칩 선택을 해제한다
-      syncYmInputs(); refresh();
+      var p = readYmSels();
+      if(!p) return;
+      S.startYm = p[0];
+      S.endYm = p[1];
+      S.rangeKey = null;                 // 직접 고르면 칩 선택을 해제한다
+      syncYmInputs(); refresh();         // 연도를 바꾸면 월 목록도 다시 만든다
     });
   });
   document.getElementById("resetYm").addEventListener("click", function(){
