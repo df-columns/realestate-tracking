@@ -204,7 +204,42 @@ curl -o index.html https://realestatetracking-89d37.web.app/
 신고 기한(계약 후 30일) 때문에 **변하는 건 최근 몇 달뿐이다.** 일일 한도(보통 10,000회)
 대비 3% 수준이다.
 
-### 상시 켜두는 PC 에 설치하기 (권장)
+### 상시 켜두는 PC 에 설치하기 — 폴더 복사 방식 (권장)
+
+이 PC 에서 꾸러미를 만들고, 그 폴더를 상시 PC 로 복사한 뒤 '설치.bat' 을 더블클릭한다.
+git 도, SSH 배포키도, 리포 clone 도 필요 없다.
+
+```bash
+py -3 bundle.py     # dist/수집기/ 생성 (약 50MB)
+```
+
+폴더에 든 것
+
+| 파일 | 용도 |
+|---|---|
+| `설치.bat` | 사람이 한 번 누른다. 파이썬·토큰 확인 → 라이브러리 → 시험 실행 → 자동 실행 등록 |
+| `지금갱신.bat` | 즉시 갱신하고 로그 끝부분을 보여준다 |
+| `자동실행끄기.bat` | 스케줄 해제 |
+| `update.bat` | 스케줄러가 부르는 실제 작업 (ASCII 이름 — bat 안에서 한글 파일명 참조를 피한다) |
+| `token.txt` | GitHub 토큰. 처음 한 번 붙여넣는다 |
+| `읽어보세요.txt` | 3줄 안내 |
+| `cache/` | 67MB. 이게 있어서 상시 PC 에서 10년 전체 수집을 다시 하지 않는다 |
+
+그 PC 에 필요한 것은 **파이썬 하나**다. `git push` 대신 GitHub Contents API 로
+`data/apt_data.json` 한 파일만 PUT 하기 때문이다(`push_github.py`). `update.py` 는
+`.git` 과 `git` 이 둘 다 있으면 git 으로, 없으면 API 로 올린다.
+
+토큰은 fine-grained PAT 하나면 된다 — Repository access 를 `realestate-tracking`
+하나로, Permissions 의 Contents 를 Read and write 로. 그 리포의 파일만 고칠 수 있다.
+`설치.bat` 이 필요할 때 발급 페이지와 메모장을 열어 준다.
+
+**꾸러미에 `apikey.txt` 가 들어 있으니 폴더를 외부에 공유하지 말 것.**
+
+윈도우 인코딩 때문에 두 가지를 맞춰 뒀다. bat 은 cp949(BOM 없음, CRLF) — UTF-8 BOM 이
+붙으면 cmd 가 첫 줄을 명령으로 읽어 에러를 낸다. 파이썬 출력도 `PYTHONIOENCODING=cp949:replace`
+로 콘솔과 맞췄다 — 안 맞추면 한 창에서 한쪽 한글이 깨진다.
+
+### 리포를 clone 해서 설치하기 (개발용)
 
 수집은 한국 네트워크에서만 나갈 수 있다. 상시 켜둔 PC 가 있으면 그게 가장 낫다 —
 주말·휴가에도 돌고, 클라우드 가입이나 카드가 필요 없다.

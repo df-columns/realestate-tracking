@@ -175,8 +175,22 @@ def git(args, check=True):
     return rc
 
 
+def have_git_repo():
+    if not os.path.isdir(os.path.join(ROOT, ".git")):
+        return False
+    return shutil.which("git") is not None
+
+
 def push():
-    """갱신된 데이터를 리포에 되밀어 GitHub Pages 와 배포 워크플로를 움직인다."""
+    """갱신된 데이터를 GitHub 에 올려 Pages 와 배포 워크플로를 움직인다.
+
+    개발용 리포에서는 git 으로, 상시 PC 에 복사해 둔 수집기에서는 GitHub API 로
+    올린다. 후자는 git 설치도 SSH 배포키도 필요 없어서 설치가 훨씬 단순하다."""
+    if not have_git_repo():
+        print("\n=== 업로드 (GitHub API) ===")
+        run(["push_github.py"], "데이터 업로드")
+        return
+
     print("\n=== 커밋 · 푸시 ===")
     if subprocess.call(["git", "diff", "--quiet", "--", "data/apt_data.json"],
                        cwd=ROOT) == 0:
