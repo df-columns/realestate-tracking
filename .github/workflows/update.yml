@@ -54,7 +54,12 @@ jobs:
           RECENT: ${{ inputs.recent || '3' }}
           FULL: ${{ inputs.full }}
         run: |
-          if [ "$FULL" = "true" ]; then
+          COUNT=$(find cache -name '*.json.gz' 2>/dev/null | wc -l)
+          echo "복원된 캐시 파일 $COUNT개 (정상은 약 7,200개)"
+          # 캐시가 없으면 최근 3개월만 받아도 과거가 비어 검증에서 막힌다.
+          # 그 회차는 전체 수집으로 채운다 (약 7,200회 — 일일 한도 안).
+          if [ "$FULL" = "true" ] || [ "$COUNT" -lt 5000 ]; then
+            echo "전체 수집으로 진행합니다"
             python update.py --full --rate 6
           else
             python update.py --recent "$RECENT" --rate 6

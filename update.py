@@ -37,6 +37,8 @@ BACKUP = DATA_JSON + ".bak"
 
 MIN_COMPLEXES = 90        # complexes.py 기준 99개 — 이보다 적으면 뭔가 잘못됐다
 MIN_YEARS = 9             # 10년치를 기대하지만 경계 달을 감안해 9년으로 본다
+MIN_ROWS = 15000          # 10년 정상 집계는 약 25,000행
+HEAD_SLACK = 12           # 가장 이른 거래가 meta.start 보다 이만큼 늦으면 과거가 비었다
 
 
 def run(args, label):
@@ -81,20 +83,41 @@ def verify():
         raise RuntimeError(
             "기간이 %s~%s 로 너무 짧습니다 — 재집계가 안 끝난 상태로 보입니다" % (start, end))
 
-    # 최근 달에 거래가 실제로 들어와 있는지 (전부 빈 껍데기면 수집이 실패한 것)
-    recent = 0
+    total = recent = 0
+    earliest = "999999"
+    cut = shift_month(end, 2)
     for c in cx:
         for a in (c.get("areas") or {}).values():
             for rows in (a.get("trade") or [], a.get("rent") or []):
                 for r in rows:
-                    if r and str(r[0]) >= shift_month(end, 2):
+                    if not r:
+                        continue
+                    ym = str(r[0])
+                    total += 1
+                    if ym < earliest:
+                        earliest = ym
+                    if ym >= cut:
                         recent += 1
+
+    # 최근 달이 비었으면 수집 자체가 실패한 것
     if recent == 0:
         raise RuntimeError("최근 3개월 거래가 0건입니다 — 수집이 실패한 것으로 보입니다")
 
+    # 과거가 비었으면 캐시 없이 재집계한 것 — 기간만 10년이고 내용은 최근 몇 달뿐이다.
+    # Actions 캐시가 유실된 첫 회차에서 이 상태가 배포되는 걸 막는다.
+    if total < MIN_ROWS:
+        raise RuntimeError(
+            "거래가 %d행뿐입니다 (%d행 이상이어야 함) — 캐시가 비어 있는 채로 집계한 "
+            "것으로 보입니다. --full 로 전체 수집이 필요합니다." % (total, MIN_ROWS))
+    if month_span(start, earliest) > HEAD_SLACK:
+        raise RuntimeError(
+            "기간은 %s 부터인데 가장 이른 거래가 %s 입니다 — 과거 캐시가 없습니다. "
+            "--full 로 전체 수집이 필요합니다." % (start, earliest))
+
     kb = os.path.getsize(DATA_JSON) / 1024.0
-    print("\n[o] 검증 통과 — 단지 %d개 · 기간 %s~%s · 최근 3개월 거래 %d건 · %.0f KB"
-          % (len(cx), start, end, recent, kb))
+    print("\n[o] 검증 통과 — 단지 %d개 · 기간 %s~%s · 거래 %d행 (가장 이른 %s) · "
+          "최근 3개월 %d건 · %.0f KB"
+          % (len(cx), start, end, total, earliest, recent, kb))
     return j
 
 
