@@ -303,23 +303,32 @@ schtasks /create /tn "실거래가 갱신" /sc daily /st 06:30 /f /tr "\"C:\User
 **예약 시작 시간을 놓친 경우 가능한 즉시 작업 시작** 을 켠다.
 실행 기록은 `daily.log` 에 쌓인다.
 
-### PC 를 켤 때마다 돌게 하려면
+### 불규칙하게 켜고 끄는 PC 에서도 매일 돌게
 
-`schtasks /create` 의 기본값은 `StartWhenAvailable=False` 다. 즉 **04:37 에 PC 가
-꺼져 있었으면 그날은 건너뛴다.** 확인해 본 결과다.
+`설치.bat` 이 자동으로 처리한다. 세 가지를 맞춘다.
 
-고치는 방법은 두 가지고, 둘 다 해도 된다.
+| 설정 | 없으면 |
+|---|---|
+| `/ru SYSTEM` 으로 등록 | 그 사용자가 로그온해 있을 때만 돈다 |
+| `StartWhenAvailable=True` | 04:37 에 꺼져 있었으면 **그날은 건너뛴다** (기본값이 False) |
+| `WakeToRun=True` | 절전이면 안 돈다 |
 
-**1) 놓친 실행을 따라잡게 한다 (권장 · 새로 만들 게 없다)**
+결과: **PC 가 하루에 한 번이라도 켜지면 그날 몫이 실행된다.** 누가 켜든, 로그온을
+하든 안 하든 무관하다. 등록된 작업을 확인하면 이렇게 나온다.
 
-```powershell
-$t = Get-ScheduledTask "실거래가 갱신"
-$t.Settings.WakeToRun = $true          # 절전이면 깨워서 실행
-$t.Settings.StartWhenAvailable = $true # 놓쳤으면 켜지는 즉시 실행
-Set-ScheduledTask -InputObject $t
+```
+UserId=SYSTEM  StartWhenAvailable=True  WakeToRun=True  ExecutionTimeLimit=PT2H
 ```
 
-**2) 시작 폴더에 넣는다**
+SYSTEM 계정에는 `py` 런처가 PATH 에 없다. 그래서 `설치.bat` 이 python.exe 절대경로를
+`pyexe.txt` 에 적어 두고 `update.bat` 이 그걸 읽는다. 파이썬이 사용자 폴더에 설치돼
+있어도 SYSTEM 이 읽을 수 있어 문제없다 — 실제로 SYSTEM 컨텍스트에서
+`requests`·`truststore` import 까지 확인했다.
+
+관리자 권한 없이 실행하면 SYSTEM 등록이 실패하고 현재 사용자로 등록된다. 그때는
+그 사용자가 로그온해 있어야 돈다.
+
+**시작 폴더에 넣는 방법 (선택)**
 
 `시작할때갱신.bat` 의 **바로가기**를 `Win+R` → `shell:startup` 에 넣는다.
 `지금갱신.bat` 을 넣으면 안 된다 — 끝에 `pause` 가 있어 부팅마다 창이 남는다.

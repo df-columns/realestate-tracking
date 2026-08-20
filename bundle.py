@@ -93,7 +93,17 @@ if errorlevel 1 (
   exit /b 1
 )
 
-schtasks /create /tn "실거래가 갱신" /sc daily /st 04:37 /f /tr "\"%~dp0update.bat\"" >nul
+rem 파이썬 절대경로를 적어 둔다. SYSTEM 계정의 PATH 에는 py 런처가 없다.
+for /f "delims=" %%P in ('%PY% -c "import sys;print(sys.executable)"') do >pyexe.txt echo %%P
+
+rem SYSTEM 계정으로 등록한다. 그러면 아무도 로그온하지 않아도, 다른 사람이
+rem 로그온해도 실행된다. 비밀번호를 물어보지 않는다.
+schtasks /create /tn "실거래가 갱신" /sc daily /st 04:37 /ru SYSTEM /f /tr "\"%~dp0update.bat\"" >nul 2>&1
+if errorlevel 1 (
+  echo         SYSTEM 등록 실패 - 현재 사용자로 등록합니다
+  echo         ^(관리자 권한으로 실행하면 로그온 없이도 돌게 됩니다^)
+  schtasks /create /tn "실거래가 갱신" /sc daily /st 04:37 /f /tr "\"%~dp0update.bat\"" >nul 2>&1
+)
 if errorlevel 1 (
   echo.
   echo   [!] 자동 실행 등록에 실패했습니다. 이 창을 관리자 권한으로 다시 실행해 보세요.
@@ -102,10 +112,20 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem 불규칙하게 켜고 끄는 PC 를 위한 설정.
+rem   StartWhenAvailable : 04:37 에 꺼져 있었으면 켜지는 즉시 그날 몫을 실행
+rem   WakeToRun          : 절전이면 깨워서 실행
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$t=Get-ScheduledTask '실거래가 갱신'; $t.Settings.StartWhenAvailable=$true; $t.Settings.WakeToRun=$true; $t.Settings.ExecutionTimeLimit='PT2H'; Set-ScheduledTask -InputObject $t | Out-Null"
+if errorlevel 1 echo         ^(놓친 실행 따라잡기 설정 실패 - 작업 스케줄러에서 직접 켜세요^)
+
 echo.
 echo   ============================================
-echo    설치 완료 — 매일 새벽 4시 37분에 자동 갱신
+echo    설치 완료
 echo   ============================================
+echo.
+echo    매일 새벽 4시 37분에 자동으로 갱신합니다.
+echo    그 시각에 PC 가 꺼져 있었으면, 다음에 켜질 때 그날 몫을 실행합니다.
+echo    누가 컴퓨터를 켜든, 로그온을 하든 안 하든 상관없습니다.
 echo.
 echo    지금 바로 갱신    : 지금갱신.bat 더블클릭
 echo    기록 보기         : daily.log
@@ -179,8 +199,12 @@ cd /d "%~dp0"
 set PYTHONIOENCODING=cp949:replace
 set PYTHONUTF8=1
 
+rem 이 작업은 SYSTEM 계정으로 돈다(아무도 로그온하지 않아도 실행되도록).
+rem SYSTEM 의 PATH 에는 py 런처가 없으므로 설치 때 적어 둔 절대경로를 쓴다.
 set PY=
-py -3 -V >nul 2>&1 && set PY=py -3
+if exist pyexe.txt set /p PY=<pyexe.txt
+if defined PY set PY="%PY%"
+if not defined PY ( py -3 -V >nul 2>&1 && set PY=py -3 )
 if not defined PY ( python -V >nul 2>&1 && set PY=python )
 if not defined PY (
   echo %DATE% %TIME% 파이썬을 찾을 수 없습니다>> daily.log
